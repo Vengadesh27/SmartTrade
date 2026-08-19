@@ -1,0 +1,9 @@
+smartapi-python
+logzero
+websocket-client
+pyotp
+pandas
+numpy
+python-dotenv
+fastapi
+uvicorn[standard]
