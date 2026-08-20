@@ -12,6 +12,7 @@ import secrets
 import threading
 import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
 
 import requests
 from dotenv import load_dotenv
@@ -43,7 +44,15 @@ ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__
 SESSION_COOKIE = "smarttrade_session"
 WEB_ORIGIN = os.environ.get("WEB_ORIGIN", "http://localhost:5173")
 
-app = FastAPI(title="SmartTrade backend", docs_url=None, redoc_url=None)
+@asynccontextmanager
+async def lifespan(_app):
+    # try_resume is defined further down; it is only called at runtime.
+    if try_resume():
+        print("[sidecar] resumed saved broker session", flush=True)
+    yield
+
+
+app = FastAPI(title="SmartTrade backend", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[WEB_ORIGIN],
@@ -98,7 +107,12 @@ def auth_login(req: LoginRequest, response: Response):
 
 @app.post("/auth/logout")
 def auth_logout(response: Response):
+    global _logged_in
     response.delete_cookie(SESSION_COOKIE)
+    # Logging out drops the broker session too, so the next sign-in verifies
+    # the MPIN again rather than silently resuming.
+    _client.clear_session()
+    _logged_in = False
     return {"ok": True}
 
 
@@ -381,6 +395,24 @@ def resolve_row(symbol, exchange="NSE"):
 def resolve(symbol, exchange="NSE"):
     row = resolve_row(symbol, exchange)
     return row["token"], row["symbol"], (exchange or "NSE").upper()
+
+
+def try_resume():
+    """Restore a saved broker session on startup so a restart doesn't force a
+    fresh MPIN. Silent no-op if there's nothing valid to resume."""
+    global _logged_in, _login_error
+    with _api_lock:
+        if _logged_in:
+            return True
+        try:
+            if not _client.resume():
+                return False
+        except Exception:
+            return False
+        _logged_in = True
+        _login_error = None
+    live.start()
+    return True
 
 
 def ensure_login(mpin=None):
