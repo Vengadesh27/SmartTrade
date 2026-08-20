@@ -3,11 +3,20 @@ import { useQueryClient } from '@tanstack/react-query';
 import type { Instrument, Quote } from '../lib/types';
 import { OrderForm } from './OrderForm';
 import { PositionsTab, HoldingsTab, OrdersTab } from './AccountTables';
+import { BotConfig } from './BotConfig';
 
-const TABS = ['Order', 'Positions', 'Holdings', 'Book'] as const;
+const TABS = ['Order', 'Positions', 'Holdings', 'Book', 'Bot'] as const;
 type Tab = (typeof TABS)[number];
 
-export function RightPanel({ active, quote }: { active: Instrument | null; quote: Quote | null }) {
+export function RightPanel({
+  active,
+  quote,
+  enabled,
+}: {
+  active: Instrument | null;
+  quote: Quote | null;
+  enabled?: boolean;
+}) {
   const [tab, setTab] = useState<Tab>('Order');
   const queryClient = useQueryClient();
 
@@ -28,19 +37,20 @@ export function RightPanel({ active, quote }: { active: Instrument | null; quote
         />
       )}
       {tab === 'Positions' && (
-        <div className="tab-body">
-          <PositionsTab />
-        </div>
+        <div className="tab-body"><PositionsTab /></div>
       )}
       {tab === 'Holdings' && (
-        <div className="tab-body">
-          <HoldingsTab />
-        </div>
+        <div className="tab-body"><HoldingsTab /></div>
       )}
       {tab === 'Book' && (
-        <div className="tab-body">
-          <OrdersTab />
-        </div>
+        <div className="tab-body"><OrdersTab /></div>
+      )}
+      {tab === 'Bot' && (
+        <BotConfig
+          defaultSymbol={active?.sym || 'NIFTY'}
+          defaultExchange={active?.exch || 'NSE'}
+          enabled={!!enabled}
+        />
       )}
     </aside>
   );

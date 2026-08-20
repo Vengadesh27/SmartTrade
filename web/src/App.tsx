@@ -11,12 +11,12 @@ import { TickerStrip } from './components/TickerStrip';
 import { Chart } from './components/Chart';
 import { RightPanel } from './components/RightPanel';
 import { ChatPanel } from './components/ChatPanel';
-import { BotPanel } from './components/BotPanel';
 import { Account } from './components/Account';
+import { BotLogs } from './components/BotLogs';
 import { OptionChain } from './components/OptionChain';
 
 type AuthState = 'checking' | 'out' | 'in';
-type View = 'dashboard' | 'account';
+type View = 'dashboard' | 'account' | 'logs';
 
 const WS_COUNT = 3;
 
@@ -190,6 +190,14 @@ export default function App() {
     );
   }
 
+  if (view === 'logs') {
+    return (
+      <div className="app-shell">
+        <BotLogs onBack={() => setView('dashboard')} enabled={auth === 'in' && brokerConnected} />
+      </div>
+    );
+  }
+
   return (
     <div className="app-shell">
       {/* ── NAVBAR ─────────────────────────────────────────────────── */}
@@ -226,6 +234,9 @@ export default function App() {
           </button>
           <button className="ghost" onClick={() => setChainOpen(true)}>
             Options
+          </button>
+          <button className="ghost" onClick={() => setView('logs')}>
+            Logs
           </button>
           <button
             className="ghost icon-btn"
@@ -278,15 +289,13 @@ export default function App() {
 
           {/* right 30%: order / positions / bot */}
           <aside className="workspace-panel">
-            <RightPanel active={active} quote={activeQuote} />
+            <RightPanel active={active} quote={activeQuote} enabled={auth === 'in' && brokerConnected} />
           </aside>
 
           {/* chat panel slides in on the far right */}
           {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
         </div>
       </div>
-
-      <BotPanel defaultSymbol={active?.sym || 'NIFTY'} defaultExchange={active?.exch || 'NSE'} enabled={auth === 'in'} />
 
       {chainOpen && (
         <OptionChain underlyingLtp={activeQuote?.ltp ?? null} onClose={() => setChainOpen(false)} />
