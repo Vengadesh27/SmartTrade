@@ -81,6 +81,7 @@ export function Chart({
   const [osc, setOsc] = useState(() => localStorage.getItem('osc') || 'rsi');
   const [overlayOn, setOverlayOn] = useState<Record<string, boolean>>(loadOverlayPrefs);
   const [showPanel, setShowPanel] = useState(false);
+  const [cleanView, setCleanView] = useState(() => localStorage.getItem('chartCleanView') === 'true');
   const [smcLayers, setSmcLayers] = useState<SmcLayers>(() => {
     try {
       return { ...DEFAULT_SMC_LAYERS, ...(JSON.parse(localStorage.getItem('smcLayers') || 'null') || {}) };
@@ -121,7 +122,7 @@ export function Chart({
     retryDelay: (attempt) => Math.min(2000 * 2 ** attempt, 15_000),
   });
 
-  const smcCanvasRef = useSmcOverlay(chartApi, priceApi, paneEl, data, smcLayers, mode === 'smc');
+  const smcCanvasRef = useSmcOverlay(chartApi, priceApi, paneEl, data, smcLayers, mode === 'smc' && !cleanView);
 
   // ---- chart + overlay series (once) ----
   useEffect(() => {
@@ -288,7 +289,7 @@ export function Chart({
       for (const col of ov.cols) {
         const s = overlayRef.current[col];
         if (!s) continue;
-        const on = !!overlayOn[ov.id];
+        const on = !cleanView && !!overlayOn[ov.id];
         s.applyOptions({ visible: on });
         s.setData(
           on
@@ -305,6 +306,7 @@ export function Chart({
       def.series.forEach((sd, i) => {
         const s = oscRef.current[i];
         if (!s) return;
+        if (cleanView) { s.setData([]); return; }
         const pts = rows
           .filter((c) => valueAt(c, sd.col) !== null)
           .map((c) => {
@@ -330,31 +332,33 @@ export function Chart({
 
     for (const line of levelLinesRef.current) price.removePriceLine(line);
     levelLinesRef.current = [];
-    const addLine = (value: number, color: string, title: string) =>
-      levelLinesRef.current.push(
-        price.createPriceLine({ price: value, color, lineWidth: 1, lineStyle: LineStyle.Dotted, title })
-      );
-    const s = data.summary;
-    if (s) {
-      if (s.prev_high != null) addLine(s.prev_high, '#f59e0b', 'PDH');
-      if (s.prev_low != null) addLine(s.prev_low, '#f59e0b', 'PDL');
+    if (!cleanView) {
+      const addLine = (value: number, color: string, title: string) =>
+        levelLinesRef.current.push(
+          price.createPriceLine({ price: value, color, lineWidth: 1, lineStyle: LineStyle.Dotted, title })
+        );
+      const s = data.summary;
+      if (s) {
+        if (s.prev_high != null) addLine(s.prev_high, '#f59e0b', 'PDH');
+        if (s.prev_low != null) addLine(s.prev_low, '#f59e0b', 'PDL');
 
-      // Number the levels outward from price, so R1/S1 are the ones price has
-      // to deal with first. Levels on the wrong side of price are ranked after
-      // the correctly-sided ones rather than dropped.
-      const last = rows[rows.length - 1].close;
-      const rank = (levels: number[], above: boolean) =>
-        [...new Set(levels)]
-          .sort((a, b) => {
-            const aSide = above ? a >= last : a <= last;
-            const bSide = above ? b >= last : b <= last;
-            if (aSide !== bSide) return aSide ? -1 : 1;
-            return Math.abs(a - last) - Math.abs(b - last);
-          })
-          .slice(0, 3);
+        // Number the levels outward from price, so R1/S1 are the ones price has
+        // to deal with first. Levels on the wrong side of price are ranked after
+        // the correctly-sided ones rather than dropped.
+        const last = rows[rows.length - 1].close;
+        const rank = (levels: number[], above: boolean) =>
+          [...new Set(levels)]
+            .sort((a, b) => {
+              const aSide = above ? a >= last : a <= last;
+              const bSide = above ? b >= last : b <= last;
+              if (aSide !== bSide) return aSide ? -1 : 1;
+              return Math.abs(a - last) - Math.abs(b - last);
+            })
+            .slice(0, 3);
 
-      rank(s.resistance, true).forEach((p, i) => addLine(p, cssVar('--down'), `R${i + 1}`));
-      rank(s.support, false).forEach((p, i) => addLine(p, cssVar('--up'), `S${i + 1}`));
+        rank(s.resistance, true).forEach((p, i) => addLine(p, cssVar('--down'), `R${i + 1}`));
+        rank(s.support, false).forEach((p, i) => addLine(p, cssVar('--up'), `S${i + 1}`));
+      }
     }
 
     // SMC zones/structure/sweeps are painted on the canvas overlay (boxes and
@@ -362,7 +366,7 @@ export function Chart({
     markersRef.current?.setMarkers([]);
 
     chart.timeScale().fitContent();
-  }, [data, mode, chartType, osc, overlayOn]);
+  }, [data, mode, chartType, osc, overlayOn, cleanView]);
 
   // ---- publish what's on screen for the assistant ----
   useEffect(() => {
@@ -479,6 +483,27 @@ export function Chart({
         <span className="tv-sep" />
         <button className={`tv-btn${logScale ? ' on' : ''}`} onClick={() => setLogScale((v) => !v)}>
           Log
+        </button>
+        <button
+          className={`tv-btn icon-btn${cleanView ? ' on' : ''}`}
+          title={cleanView ? 'Show indicators' : 'Clean view'}
+          onClick={() => {
+            const next = !cleanView;
+            setCleanView(next);
+            localStorage.setItem('chartCleanView', String(next));
+          }}
+        >
+          {cleanView ? (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+              <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" style={{ width: 14, height: 14 }}>
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+              <circle cx="12" cy="12" r="3" />
+            </svg>
+          )}
         </button>
         <button className="tv-btn" onClick={() => chartRef.current?.timeScale().fitContent()}>
           Fit

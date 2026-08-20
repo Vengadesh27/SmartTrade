@@ -1,7 +1,5 @@
 import { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import type { Instrument, Quote } from '../lib/types';
-// queryClient still used by other tabs
 
 import { PositionsTab, HoldingsTab, OrdersTab } from './AccountTables';
 import { BotConfig } from './BotConfig';
@@ -20,7 +18,6 @@ export function RightPanel({
   enabled?: boolean;
 }) {
   const [tab, setTab] = useState<Tab>('Options');
-  const queryClient = useQueryClient();
 
   return (
     <aside className="panel right-col">

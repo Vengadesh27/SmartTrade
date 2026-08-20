@@ -35,7 +35,7 @@ export function BotConfig({
   const [poll, setPoll] = useState(30);
   const [maxTrades, setMaxTrades] = useState(6);
   const [maxLoss, setMaxLoss] = useState(2000);
-  const [squareOff, setSquareOff] = useState('15:15');
+  const [squareOff, setSquareOff] = useState(defaultExchange === 'MCX' ? '23:15' : '15:15');
   const [allowShort, setAllowShort] = useState(false);
   const [status, setStatus] = useState<BotStatus>({ running: false });
   const logSeq = useRef(0);
@@ -48,6 +48,7 @@ export function BotConfig({
   useEffect(() => {
     setExchange(defaultExchange);
     setSymbol(defaultSymbol);
+    setSquareOff(defaultExchange === 'MCX' ? '23:15' : '15:15');
   }, [defaultExchange, defaultSymbol]);
 
   const handleFeed = (msg: Tick) => {
