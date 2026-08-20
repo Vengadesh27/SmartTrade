@@ -2,7 +2,7 @@
 
 The broker socket runs on its own thread inside the sidecar. Ticks (and bot
 events) are pushed onto asyncio queues so the FastAPI /ws endpoint can stream
-them to Electron without anyone polling.
+them to connected browsers without anyone polling.
 """
 
 import asyncio

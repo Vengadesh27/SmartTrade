@@ -23,10 +23,12 @@ class AngelOneClient:
         self.totp_secret = os.environ["ANGELONE_TOTP_SECRET"]
         self._conn = None
 
-    def connect(self):
+    def connect(self, mpin=None):
+        """mpin defaults to the one in .env; pass one explicitly to require the
+        user to re-enter and verify it live instead of trusting the stored value."""
         conn = SmartConnect(api_key=self.api_key)
         otp = pyotp.TOTP(self.totp_secret).now()
-        result = conn.generateSession(self.client_id, self.mpin, otp)
+        result = conn.generateSession(self.client_id, mpin or self.mpin, otp)
         if not result.get("status"):
             raise RuntimeError(f"AngelOne login failed: {result.get('message')}")
         self._conn = conn

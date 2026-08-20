@@ -1,22 +1,24 @@
-"""Localhost HTTP + WebSocket sidecar for the Electron desktop app.
+"""HTTP + WebSocket backend for the SmartTrade web app.
 
-Wraps AngelOneClient so the renderer never touches credentials. Binds to
-127.0.0.1 only and requires the shared token that Electron generates at
-launch, so nothing else on the machine can drive the trading session.
+Wraps AngelOneClient so the browser never touches broker credentials.
+Callers must hold a signed session cookie from /auth/login — see auth.py.
 """
 
 import asyncio
 import datetime as dt
 import os
+import re
 import threading
 import time
 from collections import defaultdict
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from angelone_agent import auth as auth_module
 from angelone_agent import bot as bot_module
 from angelone_agent import markets, smc
 from angelone_agent.analysis import add_indicators, summarize, to_dataframe
@@ -25,9 +27,18 @@ from angelone_agent.feed import Broadcaster, LiveFeed
 
 load_dotenv()
 
-AUTH_TOKEN = os.environ.get("SIDECAR_TOKEN", "")
+ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+SESSION_COOKIE = "smarttrade_session"
+WEB_ORIGIN = os.environ.get("WEB_ORIGIN", "http://localhost:5173")
 
-app = FastAPI(title="AngelOne Desk sidecar", docs_url=None, redoc_url=None)
+app = FastAPI(title="SmartTrade backend", docs_url=None, redoc_url=None)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[WEB_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # SmartConnect keeps one session per instance and is not thread-safe; FastAPI
 # runs sync endpoints in a threadpool, so every broker call takes this lock.
@@ -40,9 +51,110 @@ bus = Broadcaster()
 live = LiveFeed(_client, bus)
 
 
-def require_token(x_auth_token: str = Header(default="")):
-    if not AUTH_TOKEN or x_auth_token != AUTH_TOKEN:
-        raise HTTPException(status_code=401, detail="bad token")
+def require_session(smarttrade_session: str = Cookie(default="")):
+    if not auth_module.verify_session(smarttrade_session):
+        raise HTTPException(status_code=401, detail="not logged in")
+
+
+# --------------------------------------------------------------------------
+# Auth
+# --------------------------------------------------------------------------
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+def auth_login(req: LoginRequest, response: Response):
+    expected_user = os.environ.get("APP_USERNAME", "")
+    stored_hash = os.environ.get("APP_PASSWORD_HASH", "")
+    if not expected_user or not stored_hash or req.username != expected_user or not auth_module.verify_password(
+        req.password, stored_hash
+    ):
+        raise HTTPException(status_code=401, detail="invalid username or password")
+    token = auth_module.issue_session(req.username)
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=auth_module.SESSION_MAX_AGE,
+        httponly=True,
+        samesite="lax",
+        secure=WEB_ORIGIN.startswith("https://"),
+    )
+    return {"ok": True, "username": req.username}
+
+
+@app.post("/auth/logout")
+def auth_logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE)
+    return {"ok": True}
+
+
+@app.get("/auth/me")
+def auth_me(smarttrade_session: str = Cookie(default="")):
+    user = auth_module.verify_session(smarttrade_session)
+    if not user:
+        raise HTTPException(status_code=401, detail="not logged in")
+    return {"username": user}
+
+
+# --------------------------------------------------------------------------
+# Settings — AngelOne broker credentials, edited from the web app
+# --------------------------------------------------------------------------
+SETTINGS_KEYS = ["ANGELONE_API_KEY", "ANGELONE_CLIENT_ID", "ANGELONE_MPIN", "ANGELONE_TOTP_SECRET"]
+
+
+def _read_env_file():
+    values = {}
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH) as f:
+            for line in f:
+                m = re.match(r"^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$", line)
+                if m:
+                    values[m.group(1)] = m.group(2)
+    return values
+
+
+def _write_env_file(updates):
+    values = _read_env_file()
+    values.update(updates)
+    text = "\n".join(f"{k}={v}" for k, v in values.items()) + "\n"
+    with open(ENV_PATH, "w") as f:
+        f.write(text)
+    os.chmod(ENV_PATH, 0o600)
+
+
+class SettingsRequest(BaseModel):
+    ANGELONE_API_KEY: str
+    ANGELONE_CLIENT_ID: str
+    ANGELONE_MPIN: str
+    ANGELONE_TOTP_SECRET: str
+
+
+@app.get("/settings", dependencies=[Depends(require_session)])
+def get_settings():
+    env = _read_env_file()
+    return {k: env.get(k, "") for k in SETTINGS_KEYS}
+
+
+@app.post("/settings", dependencies=[Depends(require_session)])
+def save_settings(req: SettingsRequest):
+    global _client, _logged_in, _login_error
+    updates = req.model_dump()
+    for k, v in updates.items():
+        os.environ[k] = v
+    _write_env_file(updates)
+
+    _client = AngelOneClient()
+    live._client = _client
+    _runner._client = _client
+    _logged_in = False
+    _login_error = None
+    try:
+        ensure_login()
+    except HTTPException:
+        pass  # surfaced via /health same as any other login failure
+    return {"ok": True, "logged_in": _logged_in, "login_error": _login_error}
 
 
 # --------------------------------------------------------------------------
@@ -152,13 +264,19 @@ def resolve(symbol, exchange="NSE"):
     return row["token"], row["symbol"], (exchange or "NSE").upper()
 
 
-def ensure_login():
+def ensure_login(mpin=None):
+    """Connects to AngelOne, using `mpin` if given or falling back to .env.
+    Only call this from /login (live MPIN entry) or after a Settings save
+    (the user just typed fresh credentials there too) — every other route
+    must use require_broker() instead, or a stale server restart would let
+    background polling silently reconnect with the stored MPIN, bypassing
+    the live verification the MPIN gate exists for."""
     global _logged_in, _login_error
     with _api_lock:
         if _logged_in:
             return
         try:
-            _client.connect()
+            _client.connect(mpin=mpin)
             _logged_in = True
             _login_error = None
         except Exception as exc:
@@ -167,21 +285,40 @@ def ensure_login():
     live.start()  # streaming feed comes up alongside the REST session
 
 
+def require_broker():
+    """Guards every route except /login and the Settings reconnect: fails
+    clean instead of silently establishing a broker session on their behalf."""
+    if not _logged_in:
+        raise HTTPException(status_code=409, detail="not connected — verify MPIN first")
+
+
 # --------------------------------------------------------------------------
 # Routes
 # --------------------------------------------------------------------------
 @app.get("/health")
 def health():
-    return {"ok": True, "logged_in": _logged_in, "login_error": _login_error}
+    return {
+        "ok": True,
+        "logged_in": _logged_in,
+        "login_error": _login_error,
+        "client_id": _client.client_id if _logged_in else None,
+    }
 
 
-@app.post("/login", dependencies=[Depends(require_token)])
-def login():
-    ensure_login()
+class LoginBrokerRequest(BaseModel):
+    mpin: str = Field(min_length=4, max_length=6)
+
+
+@app.post("/login", dependencies=[Depends(require_session)])
+def login(req: LoginBrokerRequest):
+    """Requires the user to type their AngelOne MPIN live on every session start —
+    it's never read from .env for this call, only used as the fallback for
+    internal reconnects (e.g. after a Settings save) that aren't a fresh login."""
+    ensure_login(mpin=req.mpin)
     return {"ok": True, "client_id": _client.client_id}
 
 
-@app.get("/instrument", dependencies=[Depends(require_token)])
+@app.get("/instrument", dependencies=[Depends(require_session)])
 def instrument(symbol: str, exchange: str = "NSE"):
     row = resolve_row(symbol, exchange)
     return {
@@ -196,7 +333,7 @@ def instrument(symbol: str, exchange: str = "NSE"):
     }
 
 
-@app.get("/search", dependencies=[Depends(require_token)])
+@app.get("/search", dependencies=[Depends(require_session)])
 def search(q: str, exchange: str = "NSE", limit: int = 20):
     q = q.upper().strip()
     if len(q) < 2:
@@ -229,9 +366,9 @@ def search(q: str, exchange: str = "NSE", limit: int = 20):
     return {"results": out}
 
 
-@app.get("/quote", dependencies=[Depends(require_token)])
+@app.get("/quote", dependencies=[Depends(require_session)])
 def quote(symbol: str, exchange: str = "NSE"):
-    ensure_login()
+    require_broker()
     key = (symbol.upper(), exchange.upper())
     cached = _quote_cache.get(key)
     if cached:
@@ -291,25 +428,29 @@ def _num(value):
     return None if f != f else f
 
 
-@app.get("/candles", dependencies=[Depends(require_token)])
-def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE"):
-    ensure_login()
-    key = (symbol.upper(), exchange.upper(), interval)
+@app.get("/candles", dependencies=[Depends(require_session)])
+def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE", days: int = 1):
+    require_broker()
+    days = max(1, min(days, 90))
+    key = (symbol.upper(), exchange.upper(), interval, days)
     cached = _candle_cache.get(key)
     if cached:
         return cached
 
     token, tsym, exch = resolve(symbol, exchange)
-    start, end = markets.session_window(exch)
+    start, end = markets.lookback_window(exch, days=days)
     _throttle("candles")
-    with _api_lock:
-        raw = _client.get_historical_data(
-            token=token,
-            exchange=exch,
-            interval=interval,
-            from_date=start.strftime("%Y-%m-%d %H:%M"),
-            to_date=end.strftime("%Y-%m-%d %H:%M"),
-        )
+    try:
+        with _api_lock:
+            raw = _client.get_historical_data(
+                token=token,
+                exchange=exch,
+                interval=interval,
+                from_date=start.strftime("%Y-%m-%d %H:%M"),
+                to_date=end.strftime("%Y-%m-%d %H:%M"),
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"could not load candles: {exc}")
     if not raw:
         return {"symbol": tsym, "token": token, "exchange": exch, "candles": [], "summary": None}
 
@@ -333,12 +474,34 @@ def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE"):
 
     day_open = float(df.iloc[0]["open"])
     last = float(df.iloc[-1]["close"])
+
+    prev_high = prev_low = None
+    try:
+        pstart, pend = markets.previous_session_window(exch)
+        _throttle("candles")
+        with _api_lock:
+            praw = _client.get_historical_data(
+                token=token,
+                exchange=exch,
+                interval="FIFTEEN_MINUTE",
+                from_date=pstart.strftime("%Y-%m-%d %H:%M"),
+                to_date=pend.strftime("%Y-%m-%d %H:%M"),
+            )
+        if praw:
+            pdf = to_dataframe(praw)
+            prev_high = float(pdf["high"].max())
+            prev_low = float(pdf["low"].min())
+    except Exception:
+        pass  # previous-day levels are a nice-to-have, not worth failing the chart over
+
     out = {
         "symbol": tsym,
         "token": token,
         "exchange": exch,
         "interval": interval,
-        "session": start.strftime("%Y-%m-%d"),
+        "session": start.strftime("%Y-%m-%d")
+        if start.date() == end.date()
+        else f"{start.strftime('%Y-%m-%d')} → {end.strftime('%Y-%m-%d')}",
         "market_open": markets.is_open(exch),
         "candles": rows,
         "smc": smc.analyse(df),
@@ -352,9 +515,125 @@ def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE"):
             **{k: v for k, v in stats.items() if k != "last_close"},
             "support": [float(x) for x in stats["support"]],
             "resistance": [float(x) for x in stats["resistance"]],
+            "prev_high": prev_high,
+            "prev_low": prev_low,
         },
     }
     _candle_cache.put(key, out)
+    return out
+
+
+# --------------------------------------------------------------------------
+# Options — strike chain for the underlying's nearest expiries, with live
+# quotes (LTP/OI/volume) and Greeks (delta/gamma/theta/vega/IV) where AngelOne
+# has them. Greeks/OI/PCR are populated by AngelOne only during market hours —
+# verified live against the API; outside hours the chain still renders with
+# strikes and lot sizes, just without those fields.
+# --------------------------------------------------------------------------
+OPTION_TYPES = {"OPTIDX", "OPTSTK", "OPTFUT", "OPTCUR"}
+_chain_cache = _TTLCache(5.0)
+
+
+@app.get("/options/expiries", dependencies=[Depends(require_session)])
+def options_expiries(underlying: str):
+    underlying = underlying.upper()
+    today = dt.date.today()
+    rows = [
+        r
+        for r in scrip_rows()
+        if r.get("name") == underlying and r.get("instrumenttype") in OPTION_TYPES
+    ]
+    dated = sorted(
+        {r["expiry"] for r in rows if markets.parse_expiry(r.get("expiry")) and markets.parse_expiry(r["expiry"]) >= today},
+        key=lambda e: markets.parse_expiry(e),
+    )
+    if not dated:
+        raise HTTPException(status_code=404, detail=f"no option chain found for {underlying}")
+    return {"underlying": underlying, "expiries": dated[:12]}
+
+
+@app.get("/options/chain", dependencies=[Depends(require_session)])
+def options_chain(underlying: str, expiry: str, exchange: str = "NFO"):
+    require_broker()
+    underlying = underlying.upper()
+    key = (underlying, expiry, exchange)
+    cached = _chain_cache.get(key)
+    if cached:
+        return cached
+
+    rows = [
+        r
+        for r in scrip_rows()
+        if r.get("name") == underlying and r.get("instrumenttype") in OPTION_TYPES and r.get("expiry") == expiry
+    ]
+    if not rows:
+        raise HTTPException(status_code=404, detail="no strikes for that expiry")
+
+    strikes: dict = {}
+    for r in rows:
+        strike = round(float(r["strike"]) / 100, 2)
+        side = "CE" if r["symbol"].endswith("CE") else "PE" if r["symbol"].endswith("PE") else None
+        if not side:
+            continue
+        strikes.setdefault(strike, {})[side] = {
+            "token": r["token"],
+            "symbol": r["symbol"],
+            "lotsize": int(r.get("lotsize") or 1),
+        }
+
+    tokens = [v["token"] for pair in strikes.values() for v in pair.values()]
+    quotes_by_token = {}
+    _throttle("candles")
+    try:
+        with _api_lock:
+            for i in range(0, len(tokens), 50):  # AngelOne caps getMarketData at 50 tokens/call
+                chunk = tokens[i : i + 50]
+                res = _client.conn.getMarketData("FULL", {exchange: chunk})
+                for row in ((res.get("data") or {}).get("fetched") or []):
+                    quotes_by_token[str(row.get("symbolToken"))] = row
+    except Exception:
+        pass  # chain still renders with just strikes/lot sizes if live quotes fail
+
+    greeks_by_symbol = {}
+    try:
+        with _api_lock:
+            gres = _client.conn.optionGreek({"name": underlying, "expirydate": expiry})
+        if gres.get("status") and gres.get("data"):
+            for g in gres["data"]:
+                sym = g.get("tradingSymbol") or g.get("symbol")
+                if sym:
+                    greeks_by_symbol[sym] = g
+    except Exception:
+        pass  # Greeks/IV are a nice-to-have, not worth failing the chain over
+
+    out_rows = []
+    for strike in sorted(strikes):
+        row = {"strike": strike}
+        for side in ("CE", "PE"):
+            info = strikes[strike].get(side)
+            if not info:
+                row[side] = None
+                continue
+            q = quotes_by_token.get(str(info["token"])) or {}
+            g = greeks_by_symbol.get(info["symbol"]) or {}
+            row[side] = {
+                "symbol": info["symbol"],
+                "token": info["token"],
+                "lotsize": info["lotsize"],
+                "ltp": _num(q.get("ltp")),
+                "change_pct": _num(q.get("percentChange")),
+                "oi": _num(q.get("opnInterest")),
+                "volume": _num(q.get("tradeVolume")),
+                "iv": _num(g.get("impliedVolatility")),
+                "delta": _num(g.get("delta")),
+                "gamma": _num(g.get("gamma")),
+                "theta": _num(g.get("theta")),
+                "vega": _num(g.get("vega")),
+            }
+        out_rows.append(row)
+
+    out = {"underlying": underlying, "expiry": expiry, "exchange": exchange, "rows": out_rows}
+    _chain_cache.put(key, out)
     return out
 
 
@@ -370,17 +649,79 @@ def _book(name, fn):
     return data
 
 
-@app.get("/positions", dependencies=[Depends(require_token)])
+@app.get("/positions", dependencies=[Depends(require_session)])
 def positions():
-    ensure_login()
+    require_broker()
     rows = _book("positions", _client.get_positions) or []
     total = sum(float(r.get("pnl") or 0) for r in rows)
     return {"positions": rows, "total_pnl": total}
 
 
-@app.get("/holdings", dependencies=[Depends(require_token)])
+class ExitPositionRequest(BaseModel):
+    tradingsymbol: str
+    symboltoken: str
+    exchange: str
+    producttype: str = "INTRADAY"
+    quantity: int = Field(gt=0)
+    side: str = Field(pattern="^(BUY|SELL)$")  # the side that FLATTENS the position, not the original side
+
+
+@app.post("/positions/exit", dependencies=[Depends(require_session)])
+def exit_position(req: ExitPositionRequest):
+    """Square off one open position at market. Used by the fast-exit button on
+    each position row — still goes through the same confirm modal as any
+    order, just pre-filled so exiting a scalp is a single extra click."""
+    require_broker()
+    _throttle("order")
+    with _api_lock:
+        resp = _client.place_order(
+            tradingsymbol=req.tradingsymbol,
+            symboltoken=req.symboltoken,
+            transactiontype=req.side,
+            quantity=req.quantity,
+            exchange=req.exchange,
+            ordertype="MARKET",
+            producttype=req.producttype,
+        )
+    _book_cache.put("orders", None)
+    _book_cache.put("positions", None)
+    return {"ok": True, "response": resp}
+
+
+@app.post("/positions/square-off-all", dependencies=[Depends(require_session)])
+def square_off_all():
+    """Flattens every open position at market — the scalping panic button."""
+    require_broker()
+    rows = _book("positions", _client.get_positions) or []
+    results = []
+    for r in rows:
+        qty = int(float(r.get("netqty") or 0))
+        if qty == 0:
+            continue
+        side = "SELL" if qty > 0 else "BUY"
+        _throttle("order")
+        try:
+            with _api_lock:
+                resp = _client.place_order(
+                    tradingsymbol=r.get("tradingsymbol"),
+                    symboltoken=r.get("symboltoken"),
+                    transactiontype=side,
+                    quantity=abs(qty),
+                    exchange=r.get("exchange", "NSE"),
+                    ordertype="MARKET",
+                    producttype=r.get("producttype", "INTRADAY"),
+                )
+            results.append({"symbol": r.get("tradingsymbol"), "ok": True, "response": resp})
+        except Exception as exc:
+            results.append({"symbol": r.get("tradingsymbol"), "ok": False, "error": str(exc)})
+    _book_cache.put("orders", None)
+    _book_cache.put("positions", None)
+    return {"ok": True, "results": results}
+
+
+@app.get("/holdings", dependencies=[Depends(require_session)])
 def holdings():
-    ensure_login()
+    require_broker()
     data = _book("holdings", _client.get_holdings)
     # SmartAPI returns either a list or {holdings: [...], totalholding: {...}}
     if isinstance(data, dict):
@@ -388,24 +729,24 @@ def holdings():
     return {"holdings": data or [], "totals": {}}
 
 
-@app.get("/funds", dependencies=[Depends(require_token)])
+@app.get("/funds", dependencies=[Depends(require_session)])
 def funds():
-    ensure_login()
+    require_broker()
     _throttle("book")
     with _api_lock:
         resp = _client.conn.rmsLimit()
     return resp.get("data") or {}
 
 
-@app.get("/orders", dependencies=[Depends(require_token)])
+@app.get("/orders", dependencies=[Depends(require_session)])
 def orders():
-    ensure_login()
+    require_broker()
     return {"orders": _book("orders", _client.order_book) or []}
 
 
-@app.get("/trades", dependencies=[Depends(require_token)])
+@app.get("/trades", dependencies=[Depends(require_session)])
 def trades():
-    ensure_login()
+    require_broker()
     return {"trades": _book("trades", _client.trade_book) or []}
 
 
@@ -420,11 +761,11 @@ class OrderRequest(BaseModel):
     trigger_price: float = 0
 
 
-@app.post("/order", dependencies=[Depends(require_token)])
+@app.post("/order", dependencies=[Depends(require_session)])
 def place_order(req: OrderRequest):
     """Places a real order. Only ever called from an explicit user confirmation
     in the renderer — nothing on this server places orders on its own."""
-    ensure_login()
+    require_broker()
     token, tsym, exch = resolve(req.symbol, req.exchange)
     _throttle("order")
     with _api_lock:
@@ -448,9 +789,9 @@ class CancelRequest(BaseModel):
     variety: str = "NORMAL"
 
 
-@app.post("/order/cancel", dependencies=[Depends(require_token)])
+@app.post("/order/cancel", dependencies=[Depends(require_session)])
 def cancel_order(req: CancelRequest):
-    ensure_login()
+    require_broker()
     _throttle("order")
     with _api_lock:
         resp = _client.cancel_order(req.order_id, req.variety)
@@ -470,28 +811,28 @@ _runner = bot_module.BotRunner(
 )
 
 
-@app.get("/bot/status", dependencies=[Depends(require_token)])
+@app.get("/bot/status", dependencies=[Depends(require_session)])
 def bot_status():
     return _runner.status()
 
 
-@app.post("/bot/start", dependencies=[Depends(require_token)])
+@app.post("/bot/start", dependencies=[Depends(require_session)])
 def bot_start(cfg: bot_module.BotConfig):
-    ensure_login()
+    require_broker()
     return _runner.start(cfg)
 
 
-@app.post("/bot/stop", dependencies=[Depends(require_token)])
+@app.post("/bot/stop", dependencies=[Depends(require_session)])
 def bot_stop():
     return _runner.stop()
 
 
-@app.get("/bot/logs", dependencies=[Depends(require_token)])
+@app.get("/bot/logs", dependencies=[Depends(require_session)])
 def bot_logs(since: int = 0):
     return _runner.logs(since)
 
 
-@app.get("/bot/strategies", dependencies=[Depends(require_token)])
+@app.get("/bot/strategies", dependencies=[Depends(require_session)])
 def bot_strategies():
     return {"strategies": bot_module.STRATEGY_INFO}
 
@@ -499,7 +840,7 @@ def bot_strategies():
 # --------------------------------------------------------------------------
 # Streaming socket — ticks and bot events, pushed instead of polled.
 # --------------------------------------------------------------------------
-@app.get("/feed/status", dependencies=[Depends(require_token)])
+@app.get("/feed/status", dependencies=[Depends(require_session)])
 def feed_status():
     return live.status()
 
@@ -540,7 +881,7 @@ async def _ws_send(ws: WebSocket, queue):
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
-    if not AUTH_TOKEN or ws.query_params.get("token") != AUTH_TOKEN:
+    if not auth_module.verify_session(ws.cookies.get(SESSION_COOKIE, "")):
         await ws.close(code=4401)
         return
     await ws.accept()

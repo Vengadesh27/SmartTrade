@@ -43,6 +43,38 @@ def session_window(exchange="NSE", now=None):
     return start, min(now, end)
 
 
+def lookback_window(exchange="NSE", now=None, days=1):
+    """Return (start, end) spanning the last `days` trading days up to the
+    current/most-recent session — start is the open time `days` trading days
+    back (skipping weekends), end is session_window's usual end.
+    """
+    now = now or dt.datetime.now()
+    _, end = session_window(exchange, now)
+    open_t = session_times(exchange)[0]
+
+    cursor = end
+    remaining = max(1, days)
+    while remaining > 1:
+        cursor -= dt.timedelta(days=1)
+        if cursor.weekday() < 5:
+            remaining -= 1
+    start = cursor.replace(hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0)
+    return start, end
+
+
+def previous_session_window(exchange="NSE", now=None):
+    """Return (start, end) for the trading day before the one session_window gives."""
+    now = now or dt.datetime.now()
+    start, _ = session_window(exchange, now)
+    prev = start - dt.timedelta(days=1)
+    while prev.weekday() >= 5:
+        prev -= dt.timedelta(days=1)
+    open_t, close_t = session_times(exchange)
+    prev_start = prev.replace(hour=open_t.hour, minute=open_t.minute, second=0, microsecond=0)
+    prev_end = prev.replace(hour=close_t.hour, minute=close_t.minute, second=0, microsecond=0)
+    return prev_start, prev_end
+
+
 def is_open(exchange="NSE", now=None):
     now = now or dt.datetime.now()
     if now.weekday() >= 5:

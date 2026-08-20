@@ -1,20 +1,19 @@
 # SmartTrade
 
 An intraday trading desk for [AngelOne SmartAPI](https://smartapi.angelone.in/) —
-an Electron front end over a Python backend, built for NSE and MCX.
-
-![desk](docs/screenshot.png)
+a React web frontend over a Python backend, built for NSE and MCX.
 
 ## What it does
 
 - **Live data** — quotes and ticks stream over AngelOne's SmartWebSocketV2, not polling
-- **Charts** — candles / hollow / Heikin Ashi / bars / line / area, 1m–1h, with a
-  full drawing toolset (trend lines, rays, Fibonacci, rectangles, measure, text)
-- **Indicators** — SMA, EMA, Bollinger, VWAP, Supertrend, RSI, MACD, Stochastic, ATR
+- **Chart** — candles, session support/resistance, previous-day high/low, with a
+  mode selector (Indicators, Price Action, Smart Money Concepts) and a basic
+  drawing toolset (trend line, horizontal line, rectangle, text)
 - **Smart money concepts** — fair value gaps, order blocks, breakers, BOS/CHoCH,
-  swing structure, resting liquidity, equal highs/lows, premium/discount, sweeps
-- **Trading** — order ticket with a confirmation dialog on every order, plus
-  positions, holdings, order book and funds
+  liquidity pools, equal highs/lows, premium/discount — computed server-side,
+  shown as price-line annotations and structure markers on the chart
+- **Trading** — order ticket with a confirmation modal on every order, plus
+  positions, holdings and an order book
 - **Strategy bot** — six strategies, paper by default, with risk caps
 
 Instruments resolve by short name: `NIFTY` finds the tradable index, `CRUDEOILM`
@@ -27,7 +26,7 @@ Requires Python 3.10+ and Node 18+.
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cd desktop && npm install
+cd web && npm install
 ```
 
 Copy `.env.example` to `.env` and fill in your AngelOne API credentials:
@@ -39,39 +38,56 @@ ANGELONE_MPIN=...
 ANGELONE_TOTP_SECRET=...
 ```
 
+Set your web app login (separate from your broker credentials):
+
+```bash
+python scripts/set_password.py
+```
+
+This writes `APP_USERNAME`, `APP_PASSWORD_HASH` and `SESSION_SECRET` into `.env`.
 `.env` is gitignored — keep it that way.
 
 ## Run
 
+Two processes, both local for now:
+
 ```bash
-cd desktop && npm start
+# backend — binds to 127.0.0.1:8787
+python -m angelone_agent.sidecar
+
+# frontend — Vite dev server on :5173
+cd web && npm run dev
 ```
 
-Electron starts the Python backend itself; there is no separate server to launch.
+Open `http://localhost:5173` and sign in with the username/password you set above.
 
 ## Layout
 
 ```
-angelone_agent/     Python — broker client, indicators, SMC, strategy bot, local API
+angelone_agent/     Python — broker client, indicators, SMC, strategy bot, HTTP/WS API
   client.py           SmartConnect wrapper
-  sidecar.py          FastAPI HTTP + WebSocket server (loopback only)
-  feed.py             SmartWebSocketV2 live feed and fan-out bus
-  analysis.py         Indicator maths
-  smc.py              Smart money concepts
-  markets.py          Exchange sessions and expiries
-  bot.py              Strategy runner
-desktop/            Electron app (see desktop/README.md for detail)
-scripts/            Standalone CLI analysis scripts
+  auth.py              Password hashing + signed session cookies for the web login
+  sidecar.py           FastAPI HTTP + WebSocket server
+  feed.py              SmartWebSocketV2 live feed and fan-out bus
+  analysis.py          Indicator maths
+  smc.py                Smart money concepts
+  markets.py           Exchange sessions and expiries
+  bot.py                Strategy runner
+web/                React + Vite frontend
+  src/lib/              API client, live-feed hook, formatting, chart/drawing helpers
+  src/components/       Login, TickerStrip, Chart, RightPanel, BotPanel, SettingsModal
+scripts/            Standalone CLI scripts (analysis, connection check, set_password)
 ```
 
-The backend binds to 127.0.0.1 on a random port and requires a token Electron
-generates at launch. The renderer never receives that token or your credentials —
-it talks to the main process over IPC, which proxies through.
+Auth is a signed session cookie (see `auth.py`), issued by `POST /auth/login` and
+checked on every route and the WebSocket handshake. Broker credentials are
+edited from the Settings modal, which writes to `.env` server-side — the browser
+never holds them directly.
 
 ## Safety
 
 - Orders are never placed automatically from the ticket; each one opens a
-  confirmation dialog first.
+  confirmation modal first.
 - The bot defaults to **PAPER** mode, which simulates fills locally and only
   reads candles. **LIVE** mode is refused by the backend unless the request
   carries an explicit confirmation flag, which the UI sets only after a typed
@@ -81,8 +97,15 @@ it talks to the main process over IPC, which proxies through.
 
 This is personal trading software, not investment advice. Use at your own risk.
 
+## Hosting
+
+Not deployed anywhere yet — both processes are meant to run locally for now.
+The backend needs a host that supports long-running processes and WebSockets
+(a small VPS, Railway, Fly.io — not Vercel/Netlify-style serverless, since it
+holds a persistent broker session and feed connection). The frontend is a
+static Vite build and can go anywhere static, including Vercel/Netlify, once
+`VITE_API_BASE` points at wherever the backend ends up.
+
 ## Licence
 
-Unlicensed / all rights reserved. `desktop/renderer/vendor/lightweight-charts.js`
-is [lightweight-charts](https://github.com/tradingview/lightweight-charts) by
-TradingView, Apache-2.0.
+Unlicensed / all rights reserved.
