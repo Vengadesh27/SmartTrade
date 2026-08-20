@@ -347,33 +347,146 @@ h2 {
   color: var(--text);
 }
 
-/* ---------------- top bar ---------------- */
+/* ─── app shell ─────────────────────────────────────────────────────── */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.main-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── workspace tab bar ─────────────────────────────────────────────── */
+.ws-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 10px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+.ws-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.ws-tab:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+.ws-tab.active {
+  background: var(--panel);
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+/* ─── workspace 70/30 split ─────────────────────────────────────────── */
+.workspace {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: 70fr 30fr;
+  gap: 6px;
+  padding: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+.workspace.with-chat {
+  grid-template-columns: 70fr 30fr 320px;
+}
+.workspace-charts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+.workspace-charts > * {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.workspace-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ─── top bar ───────────────────────────────────────────────────────── */
 .topbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  height: 48px;
-  flex: 0 0 48px;
+  gap: 0;
+  height: 52px;
+  flex: 0 0 52px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  padding: 0 12px;
 }
-.brand {
+.topbar-brand {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
-  margin-right: 4px;
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
 }
-.brand strong {
-  font-size: 14.5px;
+.topbar-brand strong {
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.03em;
   color: var(--text);
 }
-.topbar-spacer {
-  flex: 1;
+.topbar-stats {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.topbar-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  padding: 0 8px;
+  border-right: 1px solid var(--border);
+}
+.topbar-stat:last-of-type {
+  border-right: none;
+}
+.topbar-stat-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  line-height: 1.2;
+}
+.topbar-stat-value {
+  font-size: 12.5px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  line-height: 1.3;
+}
+.topbar-sep {
+  width: 1px;
+  height: 22px;
+  background: var(--border);
+  margin: 0 4px;
 }
 .dot {
   width: 8px;
@@ -476,18 +589,7 @@ h2 {
   font-size: 11.5px;
 }
 
-/* ---------------- layout ---------------- */
-.grid {
-  flex: 1 1 auto;
-  display: grid;
-  grid-template-columns: 1fr 290px;
-  gap: 8px;
-  padding: 8px;
-  min-height: 0;
-}
-.grid.with-chat {
-  grid-template-columns: 1fr 290px 340px;
-}
+/* ---------------- layout (legacy, kept for account page) ---------------- */
 
 /* ---------------- assistant ---------------- */
 .chat-panel {

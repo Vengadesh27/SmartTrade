@@ -52,7 +52,15 @@ const MODES: { id: ChartMode; label: string; disabled?: boolean }[] = [
 
 type AnyPriceSeries = ISeriesApi<'Candlestick' | 'Bar' | 'Line' | 'Area'>;
 
-export function Chart({ active, tick }: { active: Instrument | null; tick: Quote | null }) {
+export function Chart({
+  active,
+  tick,
+  defaultInterval = 'FIFTEEN_MINUTE',
+}: {
+  active: Instrument | null;
+  tick: Quote | null;
+  defaultInterval?: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const priceRef = useRef<AnyPriceSeries | null>(null);
@@ -64,7 +72,7 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
   const levelLinesRef = useRef<IPriceLine[]>([]);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
 
-  const [interval, setInterval_] = useState('FIFTEEN_MINUTE');
+  const [interval, setInterval_] = useState(defaultInterval);
   const [days, setDays] = useState(1);
   const [mode, setMode] = useState<ChartMode>('indicators');
   const [chartType, setChartType] = useState<ChartType>(
