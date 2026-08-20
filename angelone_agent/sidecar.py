@@ -291,7 +291,7 @@ def chat_clear():
 # --------------------------------------------------------------------------
 # Rate limiting — AngelOne throttles per endpoint and bans on sustained abuse.
 # --------------------------------------------------------------------------
-_RATE_LIMITS = {"quote": 8.0, "candles": 2.5, "order": 15.0, "book": 1.0}
+_RATE_LIMITS = {"quote": 8.0, "candles": 2.5, "candles_prev": 1.0, "order": 15.0, "book": 1.0}
 _last_call = defaultdict(float)
 _rate_lock = threading.Lock()
 
@@ -330,6 +330,8 @@ _book_cache = _TTLCache(5.0)
 # Last successful candle payload per key, kept all day. AngelOne throttles in
 # bursts; serving slightly stale bars beats blanking the chart.
 _candle_last_good = _TTLCache(86400.0)
+# Previous-session H/L: changes at most once a day, so cache for 12 hours.
+_prev_session_cache: dict = {}
 
 
 # --------------------------------------------------------------------------
@@ -634,19 +636,24 @@ def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE", d
     prev_high = prev_low = None
     try:
         pstart, pend = markets.previous_session_window(exch)
-        _throttle("candles")
-        with _api_lock:
-            praw = _client.get_historical_data(
-                token=token,
-                exchange=exch,
-                interval="FIFTEEN_MINUTE",
-                from_date=pstart.strftime("%Y-%m-%d %H:%M"),
-                to_date=pend.strftime("%Y-%m-%d %H:%M"),
-            )
-        if praw:
-            pdf = to_dataframe(praw)
-            prev_high = float(pdf["high"].max())
-            prev_low = float(pdf["low"].min())
+        _prev_key = (token, exch, pstart.date().isoformat())
+        if _prev_key in _prev_session_cache:
+            prev_high, prev_low = _prev_session_cache[_prev_key]
+        else:
+            _throttle("candles_prev")
+            with _api_lock:
+                praw = _client.get_historical_data(
+                    token=token,
+                    exchange=exch,
+                    interval="FIFTEEN_MINUTE",
+                    from_date=pstart.strftime("%Y-%m-%d %H:%M"),
+                    to_date=pend.strftime("%Y-%m-%d %H:%M"),
+                )
+            if praw:
+                pdf = to_dataframe(praw)
+                prev_high = float(pdf["high"].max())
+                prev_low = float(pdf["low"].min())
+                _prev_session_cache[_prev_key] = (prev_high, prev_low)
     except Exception:
         pass  # previous-day levels are a nice-to-have, not worth failing the chart over
 
@@ -1095,6 +1102,18 @@ def main():
 
     port = int(os.environ.get("SIDECAR_PORT", "8787"))
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+
+
+# Serve the built Vite frontend as static files when web/dist exists.
+# This lets a single uvicorn process serve both the API and the UI in production.
+# In dev mode (npm run dev on :5173) the dist folder is absent so CORS handles it.
+import pathlib as _pathlib
+
+_WEB_DIST = _pathlib.Path(__file__).parent.parent / "web" / "dist"
+if _WEB_DIST.exists():
+    from fastapi.staticfiles import StaticFiles
+
+    app.mount("/", StaticFiles(directory=str(_WEB_DIST), html=True), name="static")
 
 
 if __name__ == "__main__":

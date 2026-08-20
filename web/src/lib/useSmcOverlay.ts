@@ -229,15 +229,21 @@ export function useSmcOverlay(
     };
 
     draw();
+    let rafId = 0;
+    const scheduleDraw = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(draw);
+    };
     const ts = chart.timeScale();
-    ts.subscribeVisibleLogicalRangeChange(draw);
-    const ro = new ResizeObserver(draw);
+    ts.subscribeVisibleLogicalRangeChange(scheduleDraw);
+    const ro = new ResizeObserver(scheduleDraw);
     ro.observe(container);
-    window.addEventListener('themechange', draw);
+    window.addEventListener('themechange', scheduleDraw);
     return () => {
-      ts.unsubscribeVisibleLogicalRangeChange(draw);
+      cancelAnimationFrame(rafId);
+      ts.unsubscribeVisibleLogicalRangeChange(scheduleDraw);
       ro.disconnect();
-      window.removeEventListener('themechange', draw);
+      window.removeEventListener('themechange', scheduleDraw);
     };
   }, [chart, series, container, data, layers, active]);
 

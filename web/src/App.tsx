@@ -31,6 +31,8 @@ export default function App() {
   const [clock, setClock] = useState('');
   const [theme, setTheme] = useState<Theme>(getTheme);
   const tokenToKey = useRef<Record<string, string>>({});
+  const pendingTicksRef = useRef<Record<string, Tick>>({});
+  const tickRafRef = useRef<number | null>(null);
 
   useEffect(() => {
     applyTheme(theme);
@@ -107,7 +109,21 @@ export default function App() {
   function applyTick(tick: Tick) {
     const key = tokenToKey.current[String(tick.token)];
     if (!key) return;
-    setQuotes((prev) => ({ ...prev, [key]: { ...prev[key], ...tick } as Quote }));
+    pendingTicksRef.current[key] = { ...pendingTicksRef.current[key], ...tick };
+    if (tickRafRef.current === null) {
+      tickRafRef.current = requestAnimationFrame(() => {
+        tickRafRef.current = null;
+        const pending = pendingTicksRef.current;
+        pendingTicksRef.current = {};
+        setQuotes((prev) => {
+          const next = { ...prev };
+          for (const [k, t] of Object.entries(pending)) {
+            next[k] = { ...prev[k], ...t } as Quote;
+          }
+          return next;
+        });
+      });
+    }
   }
 
   const handleOpen = useCallback((send: (msg: unknown) => void) => {
