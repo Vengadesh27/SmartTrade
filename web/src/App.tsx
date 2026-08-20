@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
 import { api } from './lib/api';
-import { fmt, signed, cls } from './lib/format';
 import { keyOf, PINNED_TICKERS, type Instrument, type Quote } from './lib/types';
 import { getTheme, applyTheme, setUserTheme, watchSystemTheme, type Theme } from './lib/theme';
 import { useLiveFeed, type Tick } from './lib/useLiveFeed';
@@ -121,18 +119,8 @@ export default function App() {
 
   useLiveFeed(handleFeed, auth === 'in' && brokerConnected, handleOpen);
 
-  const { data: funds } = useQuery({
-    queryKey: ['funds'],
-    queryFn: () => api.get<{ availablecash?: string; net?: string }>('/funds'),
-    enabled: brokerConnected,
-    refetchInterval: 15_000,
-  });
-  const { data: positions } = useQuery({
-    queryKey: ['positions'],
-    queryFn: () => api.get<{ total_pnl: number }>('/positions'),
-    enabled: brokerConnected,
-    refetchInterval: 15_000,
-  });
+  // Funds and positions are fetched by the panels that display them (profile
+  // page, Positions tab) — the top bar no longer shows account figures.
 
   if (auth === 'checking' || (auth === 'in' && brokerChecking)) {
     return (
@@ -166,6 +154,8 @@ export default function App() {
       <Account
         username={username}
         clientId={clientId}
+        feedStatus={feedStatus}
+        clock={clock}
         onBack={() => setView('dashboard')}
         onLogout={async () => {
           await api.post('/auth/logout');
@@ -179,34 +169,16 @@ export default function App() {
     <>
       <header className="topbar">
         <div className="brand">
-          <span className="dot ok" />
+          {/* the one operational signal worth keeping in the bar — the rest
+              of the account stats live on the profile page */}
+          <span
+            className={`dot ${feedStatus === 'live' ? 'ok' : feedStatus === 'error' ? 'err' : ''}`}
+            title={`Feed ${feedStatus}`}
+          />
           <strong>SmartTrade</strong>
         </div>
         <TickerStrip quotes={quotes} active={active} onSelect={setActive} />
-        <div className="topstats">
-          <div className="stat">
-            <label>Client</label>
-            <span>{clientId || '—'}</span>
-          </div>
-          <div className="stat">
-            <label>Available</label>
-            <span>{funds ? '₹' + fmt(Number(funds.availablecash ?? funds.net ?? 0), 0) : '—'}</span>
-          </div>
-          <div className="stat">
-            <label>Day P&amp;L</label>
-            <span className={positions ? cls(positions.total_pnl) : ''}>
-              {positions ? signed(positions.total_pnl) : '—'}
-            </span>
-          </div>
-          <div className="stat">
-            <label>Feed</label>
-            <span className={feedStatus === 'live' ? 'up' : 'muted'}>{feedStatus}</span>
-          </div>
-          <div className="stat">
-            <label>Clock</label>
-            <span>{clock}</span>
-          </div>
-        </div>
+        <span className="topbar-spacer" />
         <button className="ghost" onClick={() => setChainOpen(true)}>
           Options
         </button>

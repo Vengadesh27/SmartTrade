@@ -18,11 +18,15 @@ type Trade = {
 export function Account({
   username,
   clientId,
+  feedStatus,
+  clock,
   onBack,
   onLogout,
 }: {
   username: string;
   clientId: string;
+  feedStatus: 'live' | 'off' | 'error';
+  clock: string;
   onBack: () => void;
   onLogout: () => void;
 }) {
@@ -67,16 +71,22 @@ export function Account({
         </div>
         <div className="account-meta">
           <span>
-            <b className="muted">Signed in as</b>
-            {username}
+            <b className="muted">Client ID</b>
+            {clientId || '—'}
           </span>
           <span>
             <b className="muted">Broker</b>
             AngelOne SmartAPI
           </span>
           <span>
-            <b className="muted">Client ID</b>
-            {clientId || '—'}
+            <b className="muted">Feed</b>
+            <span className={feedStatus === 'live' ? 'up' : feedStatus === 'error' ? 'down' : 'muted'}>
+              {feedStatus}
+            </span>
+          </span>
+          <span>
+            <b className="muted">Clock</b>
+            {clock || '—'}
           </span>
         </div>
       </section>
