@@ -30,6 +30,11 @@ export function Login({ onLoggedIn }: { onLoggedIn: (username: string) => void }
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [mpin, setMpin] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [notice, setNotice] = useState('');
   const sceneRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
 
@@ -60,6 +65,38 @@ export function Login({ onLoggedIn }: { onLoggedIn: (username: string) => void }
     }
   }
 
+  /** Reset the app password by proving possession of the broker MPIN. */
+  async function submitReset(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    if (newPassword !== confirm) return setError('Passwords do not match.');
+    if (newPassword.length < 8) return setError('Use at least 8 characters.');
+    setBusy(true);
+    try {
+      const res = await api.post<{ username: string }>('/auth/reset', {
+        mpin,
+        new_password: newPassword,
+      });
+      setResetting(false);
+      setMpin('');
+      setNewPassword('');
+      setConfirm('');
+      setUsername(res.username);
+      setPassword('');
+      setNotice(`Password updated. Sign in as ${res.username}.`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Reset failed.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function toggleReset(on: boolean) {
+    setResetting(on);
+    setError('');
+    setNotice('');
+  }
+
   return (
     <div className="login-screen" ref={sceneRef} onMouseMove={handleMouseMove}>
       <div className="login-parallax">
@@ -74,22 +111,71 @@ export function Login({ onLoggedIn }: { onLoggedIn: (username: string) => void }
         </div>
       </div>
 
-      <form className="login-box form" onSubmit={submit}>
-        <h1>SmartTrade</h1>
-        <span className="muted">Sign in to continue</span>
-        {error && <p className="login-error">{error}</p>}
-        <label>
-          Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
-        </label>
-        <label>
-          Password
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-        </label>
-        <button type="submit" className="primary" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+      {resetting ? (
+        <form className="login-box form" onSubmit={submitReset}>
+          <h1>Reset password</h1>
+          <span className="muted">Verify with your AngelOne MPIN</span>
+          {error && <p className="login-error">{error}</p>}
+          <label>
+            MPIN
+            <input
+              type="password"
+              inputMode="numeric"
+              value={mpin}
+              onChange={(e) => setMpin(e.target.value)}
+              autoFocus
+              required
+            />
+          </label>
+          <label>
+            New password
+            <input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              minLength={8}
+              required
+            />
+          </label>
+          <label>
+            Confirm password
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              minLength={8}
+              required
+            />
+          </label>
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? 'Updating…' : 'Update password'}
+          </button>
+          <button type="button" className="login-link" onClick={() => toggleReset(false)}>
+            Back to sign in
+          </button>
+        </form>
+      ) : (
+        <form className="login-box form" onSubmit={submit}>
+          <h1>SmartTrade</h1>
+          <span className="muted">Sign in to continue</span>
+          {notice && <p className="login-notice">{notice}</p>}
+          {error && <p className="login-error">{error}</p>}
+          <label>
+            Username
+            <input value={username} onChange={(e) => setUsername(e.target.value)} autoFocus required />
+          </label>
+          <label>
+            Password
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          </label>
+          <button type="submit" className="primary" disabled={busy}>
+            {busy ? 'Signing in…' : 'Sign in'}
+          </button>
+          <button type="button" className="login-link" onClick={() => toggleReset(true)}>
+            Forgot password?
+          </button>
+        </form>
+      )}
     </div>
   );
 }

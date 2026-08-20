@@ -10,7 +10,7 @@ import { MpinGate } from './components/MpinGate';
 import { TickerStrip } from './components/TickerStrip';
 import { Chart } from './components/Chart';
 import { RightPanel } from './components/RightPanel';
-import { SettingsModal } from './components/SettingsModal';
+import { ChatPanel } from './components/ChatPanel';
 import { BotPanel } from './components/BotPanel';
 import { Account } from './components/Account';
 import { OptionChain } from './components/OptionChain';
@@ -28,7 +28,7 @@ export default function App() {
   const [quotes, setQuotes] = useState<Record<string, Quote>>({});
   const [active, setActive] = useState<Instrument | null>(PINNED_TICKERS[0]);
   const [feedStatus, setFeedStatus] = useState<'live' | 'off' | 'error'>('off');
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const [chainOpen, setChainOpen] = useState(false);
   const [clock, setClock] = useState('');
   const [theme, setTheme] = useState<Theme>(getTheme);
@@ -210,6 +210,9 @@ export default function App() {
         <button className="ghost" onClick={() => setChainOpen(true)}>
           Options
         </button>
+        <button className={`ghost${chatOpen ? ' on' : ''}`} onClick={() => setChatOpen((v) => !v)}>
+          Assistant
+        </button>
         <button
           className="ghost icon-btn"
           title="Switch theme"
@@ -230,7 +233,7 @@ export default function App() {
             </svg>
           )}
         </button>
-        <button className="ghost" onClick={() => setSettingsOpen(true)}>
+        <button className="ghost" onClick={() => setView('account')}>
           Settings
         </button>
         <button
@@ -247,14 +250,14 @@ export default function App() {
         </button>
       </header>
 
-      <main className="grid">
+      <main className={`grid${chatOpen ? ' with-chat' : ''}`}>
         <Chart active={active} tick={activeQuote} />
         <RightPanel active={active} quote={activeQuote} />
+        {chatOpen && <ChatPanel onClose={() => setChatOpen(false)} />}
       </main>
 
       <BotPanel defaultSymbol={active?.sym || 'NIFTY'} defaultExchange={active?.exch || 'NSE'} enabled={auth === 'in'} />
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {chainOpen && (
         <OptionChain underlyingLtp={activeQuote?.ltp ?? null} onClose={() => setChainOpen(false)} />
       )}

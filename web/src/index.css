@@ -172,13 +172,29 @@ h2 {
 .login-box {
   position: relative;
   z-index: 1;
-  width: 320px;
-  padding: 24px;
+  width: 400px;
+  padding: 36px 34px;
   background: var(--panel);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
   animation: login-box-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  gap: 16px;
+}
+.login-box label {
+  font-size: 11.5px;
+  gap: 7px;
+}
+.login-box input {
+  padding: 13px 14px;
+  font-size: 15px;
+  border-radius: 8px;
+}
+.login-box button[type='submit'] {
+  margin-top: 6px;
+  padding: 13px;
+  font-size: 15px;
+  border-radius: 8px;
 }
 @keyframes login-box-in {
   from {
@@ -191,18 +207,99 @@ h2 {
   }
 }
 .login-box h1 {
-  font-size: 16px;
-  margin: 0 0 4px;
+  font-size: 22px;
+  margin: 0 0 6px;
+  letter-spacing: -0.01em;
 }
 .login-box .muted {
   display: block;
-  margin-bottom: 16px;
-  font-size: 11px;
+  margin-bottom: 6px;
+  font-size: 13px;
 }
 .login-error {
   color: var(--down);
-  font-size: 11px;
-  margin: -2px 0 8px;
+  font-size: 12.5px;
+  margin: -2px 0 4px;
+}
+/* profile page: identity strip + settings cards */
+.account-meta {
+  display: flex;
+  gap: 22px;
+  margin-left: auto;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+.account-meta span {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.account-meta b {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  font-weight: 600;
+}
+.account-settings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.account-settings .form {
+  margin-top: 4px;
+}
+.status-ok {
+  color: var(--up);
+}
+.status-err {
+  color: var(--down);
+}
+
+.chart-status {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 12.5px;
+  pointer-events: none;
+}
+.chart-status b {
+  color: var(--text);
+  font-size: 14px;
+}
+.chart-status span {
+  max-width: 460px;
+  color: var(--down);
+}
+.chart-status button {
+  pointer-events: auto;
+  border: 1px solid var(--border-strong);
+}
+
+.login-notice {
+  color: var(--up);
+  font-size: 12.5px;
+  margin: -2px 0 4px;
+}
+.login-link {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  padding: 2px;
+  text-decoration: underline;
+  align-self: center;
+}
+.login-link:hover {
+  color: var(--text);
 }
 
 /* ---------------- top bar ---------------- */
@@ -330,6 +427,188 @@ h2 {
   gap: 8px;
   padding: 8px;
   min-height: 0;
+}
+.grid.with-chat {
+  grid-template-columns: 1fr 290px 340px;
+}
+
+/* ---------------- assistant ---------------- */
+.chat-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+.chat-head-actions {
+  display: flex;
+  gap: 4px;
+}
+.chat-warning {
+  margin: 0;
+  padding: 8px 12px;
+  font-size: 11.5px;
+  color: var(--warn);
+  border-bottom: 1px solid var(--border);
+}
+.chat-error {
+  margin: 0;
+  padding: 6px 12px;
+  font-size: 11.5px;
+  color: var(--down);
+}
+.chat-log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  max-width: 92%;
+}
+.chat-msg.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+.chat-msg.assistant {
+  align-self: flex-start;
+}
+.chat-bubble {
+  padding: 8px 11px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+/* Only raw (user) text keeps its literal line breaks; rendered Markdown
+   manages its own block spacing. */
+.chat-msg.user .chat-bubble {
+  white-space: pre-wrap;
+}
+
+/* ---------------- rendered markdown ---------------- */
+.md > *:first-child {
+  margin-top: 0;
+}
+.md > *:last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 8px;
+}
+.md h3,
+.md h4,
+.md h5,
+.md h6 {
+  margin: 12px 0 6px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.md ul,
+.md ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.md li {
+  margin: 3px 0;
+}
+.md li > ul,
+.md li > ol {
+  margin: 3px 0 0;
+}
+.md strong {
+  font-weight: 700;
+  color: var(--text);
+}
+.md em {
+  font-style: italic;
+}
+.md code {
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  font-size: 11.5px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.md pre {
+  margin: 0 0 8px;
+  padding: 9px 11px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow-x: auto;
+}
+.md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.md hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+.md a {
+  color: var(--accent);
+}
+/* Bold inside the user's own blue bubble must stay legible. */
+.chat-msg.user .md strong {
+  color: inherit;
+}
+.chat-msg.user .chat-bubble {
+  background: var(--accent);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.chat-msg.assistant .chat-bubble {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 3px;
+}
+.chat-typing {
+  color: var(--muted);
+  font-style: italic;
+}
+.chat-ts {
+  font-size: 9.5px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+.chat-input {
+  display: flex;
+  gap: 6px;
+  padding: 10px;
+  border-top: 1px solid var(--border);
+  align-items: flex-end;
+}
+.chat-input textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+.chat-input textarea:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 .panel {
   background: var(--panel);

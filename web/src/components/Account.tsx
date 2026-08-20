@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { fmt, signed, cls } from '../lib/format';
 import type { Position } from '../lib/tables';
+import { SettingsForm } from './SettingsForm';
 
 type Trade = {
   tradingsymbol?: string;
@@ -62,6 +64,20 @@ export function Account({
         <div className="account-id">
           <h1>{username}</h1>
           <span className="muted">AngelOne client {clientId}</span>
+        </div>
+        <div className="account-meta">
+          <span>
+            <b className="muted">Signed in as</b>
+            {username}
+          </span>
+          <span>
+            <b className="muted">Broker</b>
+            AngelOne SmartAPI
+          </span>
+          <span>
+            <b className="muted">Client ID</b>
+            {clientId || '—'}
+          </span>
         </div>
       </section>
 
@@ -164,6 +180,79 @@ export function Account({
           </div>
         </div>
       </section>
+
+      <h2 className="account-section-title">Settings</h2>
+      <section className="account-settings">
+        <div className="panel account-report-card">
+          <h3>API credentials</h3>
+          <p className="muted">Broker keys and the optional Assistant key.</p>
+          <SettingsForm />
+        </div>
+
+        <div className="panel account-report-card">
+          <h3>App password</h3>
+          <p className="muted">The login for this app, separate from your broker MPIN.</p>
+          <PasswordForm />
+        </div>
+      </section>
     </div>
+  );
+}
+
+/** Change the app login password, proving the current one. */
+function PasswordForm() {
+  const [current, setCurrent] = useState('');
+  const [next, setNext] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [status, setStatus] = useState<{ text: string; ok: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (next !== confirm) return setStatus({ text: 'New passwords do not match.', ok: false });
+    if (next.length < 8) return setStatus({ text: 'Use at least 8 characters.', ok: false });
+    setBusy(true);
+    try {
+      await api.post('/auth/password', { current_password: current, new_password: next });
+      setCurrent('');
+      setNext('');
+      setConfirm('');
+      setStatus({ text: 'Password updated.', ok: true });
+    } catch (err) {
+      setStatus({ text: err instanceof Error ? err.message : 'Update failed.', ok: false });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="form" onSubmit={submit}>
+      <label>
+        Current password
+        <input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+      </label>
+      <div className="row2">
+        <label>
+          New password
+          <input type="password" value={next} onChange={(e) => setNext(e.target.value)} minLength={8} required />
+        </label>
+        <label>
+          Confirm
+          <input
+            type="password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            minLength={8}
+            required
+          />
+        </label>
+      </div>
+      {status && <p className={`note ${status.ok ? 'status-ok' : 'status-err'}`}>{status.text}</p>}
+      <div>
+        <button type="submit" className="primary" disabled={busy}>
+          {busy ? 'Updating…' : 'Change password'}
+        </button>
+      </div>
+    </form>
   );
 }

@@ -8,18 +8,29 @@ import asyncio
 import datetime as dt
 import os
 import re
+import secrets
 import threading
 import time
 from collections import defaultdict
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi import (
+    Cookie,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Request,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from angelone_agent import auth as auth_module
 from angelone_agent import bot as bot_module
+from angelone_agent import chat as chat_module
 from angelone_agent import markets, smc
 from angelone_agent.analysis import add_indicators, summarize, to_dataframe
 from angelone_agent.client import SCRIP_MASTER_URL, AngelOneClient
@@ -90,6 +101,66 @@ def auth_logout(response: Response):
     return {"ok": True}
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+@app.post("/auth/password", dependencies=[Depends(require_session)])
+def auth_change_password(req: PasswordChangeRequest):
+    """Change the app password from the profile page, proving the current one."""
+    stored = os.environ.get("APP_PASSWORD_HASH", "")
+    if not stored or not auth_module.verify_password(req.current_password, stored):
+        raise HTTPException(status_code=401, detail="Current password is incorrect.")
+    new_hash = auth_module.hash_password(req.new_password)
+    _write_env_file({"APP_PASSWORD_HASH": new_hash})
+    os.environ["APP_PASSWORD_HASH"] = new_hash
+    return {"ok": True}
+
+
+# Reachable while logged out, so it is rate limited per IP.
+_reset_limiter = auth_module.AttemptLimiter(max_attempts=5, window=900)
+
+
+class ResetRequest(BaseModel):
+    mpin: str
+    new_password: str = Field(min_length=8)
+
+
+@app.post("/auth/reset")
+def auth_reset(req: ResetRequest, request: Request):
+    """Reset the app password by proving possession of the broker MPIN."""
+    client = request.client.host if request.client else "unknown"
+
+    wait = _reset_limiter.blocked_for(client)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Too many attempts. Try again in {wait // 60 + 1} minute(s).",
+        )
+
+    if not os.environ.get("ANGELONE_MPIN"):
+        raise HTTPException(status_code=400, detail="No MPIN is configured, so it cannot verify you.")
+
+    if not auth_module.verify_mpin(req.mpin):
+        _reset_limiter.record_failure(client)
+        left = _reset_limiter.remaining(client)
+        suffix = f" {left} attempt(s) left." if left else ""
+        raise HTTPException(status_code=401, detail=f"Incorrect MPIN.{suffix}")
+
+    username = os.environ.get("APP_USERNAME") or "admin"
+    updates = {"APP_USERNAME": username, "APP_PASSWORD_HASH": auth_module.hash_password(req.new_password)}
+    env = _read_env_file()
+    if not env.get("SESSION_SECRET"):
+        updates["SESSION_SECRET"] = secrets.token_hex(32)
+    _write_env_file(updates)
+    for k, v in updates.items():
+        os.environ[k] = v
+
+    _reset_limiter.reset(client)
+    return {"ok": True, "username": username}
+
+
 @app.get("/auth/me")
 def auth_me(smarttrade_session: str = Cookie(default="")):
     user = auth_module.verify_session(smarttrade_session)
@@ -101,7 +172,13 @@ def auth_me(smarttrade_session: str = Cookie(default="")):
 # --------------------------------------------------------------------------
 # Settings — AngelOne broker credentials, edited from the web app
 # --------------------------------------------------------------------------
-SETTINGS_KEYS = ["ANGELONE_API_KEY", "ANGELONE_CLIENT_ID", "ANGELONE_MPIN", "ANGELONE_TOTP_SECRET"]
+SETTINGS_KEYS = [
+    "ANGELONE_API_KEY",
+    "ANGELONE_CLIENT_ID",
+    "ANGELONE_MPIN",
+    "ANGELONE_TOTP_SECRET",
+    "GEMINI_API_KEY",
+]
 
 
 def _read_env_file():
@@ -129,6 +206,7 @@ class SettingsRequest(BaseModel):
     ANGELONE_CLIENT_ID: str
     ANGELONE_MPIN: str
     ANGELONE_TOTP_SECRET: str
+    GEMINI_API_KEY: str = ""  # optional: only the assistant needs it
 
 
 @app.get("/settings", dependencies=[Depends(require_session)])
@@ -141,9 +219,18 @@ def get_settings():
 def save_settings(req: SettingsRequest):
     global _client, _logged_in, _login_error
     updates = req.model_dump()
+    before = _read_env_file()
+    # Re-logging in on every save is what trips AngelOne's rate limiter, so
+    # only rebuild the broker session when a broker credential actually moved.
+    broker_changed = any(
+        k.startswith("ANGELONE_") and before.get(k, "") != v for k, v in updates.items()
+    )
     for k, v in updates.items():
         os.environ[k] = v
     _write_env_file(updates)
+
+    if not broker_changed:
+        return {"ok": True, "logged_in": _logged_in, "login_error": _login_error}
 
     _client = AngelOneClient()
     live._client = _client
@@ -155,6 +242,34 @@ def save_settings(req: SettingsRequest):
     except HTTPException:
         pass  # surfaced via /health same as any other login failure
     return {"ok": True, "logged_in": _logged_in, "login_error": _login_error}
+
+
+# --------------------------------------------------------------------------
+# Assistant — Gemini, with the conversation kept server-side
+# --------------------------------------------------------------------------
+class ChatRequest(BaseModel):
+    message: str
+    context: dict | None = None  # snapshot of the chart the user is looking at
+
+
+@app.get("/chat/history", dependencies=[Depends(require_session)])
+def chat_history():
+    return {"messages": chat_module.store.all(), "configured": bool(os.environ.get("GEMINI_API_KEY"))}
+
+
+@app.post("/chat", dependencies=[Depends(require_session)])
+def chat_send(req: ChatRequest):
+    try:
+        reply = chat_module.send(req.message, req.context)
+    except chat_module.ChatError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"reply": reply, "messages": chat_module.store.all()}
+
+
+@app.post("/chat/clear", dependencies=[Depends(require_session)])
+def chat_clear():
+    chat_module.store.clear()
+    return {"ok": True}
 
 
 # --------------------------------------------------------------------------

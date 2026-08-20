@@ -4,6 +4,7 @@ const IST_OFFSET = 5.5 * 3600;
  * IST offset makes it display IST wall-clock time without a timezone plugin. */
 export const barTime = (iso: string): number => Math.floor(new Date(iso).getTime() / 1000) + IST_OFFSET;
 
+/** Every indicator column /candles returns (see INDICATOR_COLUMNS in sidecar.py). */
 export type Candle = {
   time: string;
   open: number;
@@ -13,7 +14,21 @@ export type Candle = {
   volume: number;
   sma_20?: number | null;
   sma_50?: number | null;
+  ema_9?: number | null;
+  ema_21?: number | null;
+  bb_upper?: number | null;
+  bb_mid?: number | null;
+  bb_lower?: number | null;
   vwap?: number | null;
+  supertrend?: number | null;
+  supertrend_dir?: number | null;
+  rsi?: number | null;
+  macd?: number | null;
+  macd_signal?: number | null;
+  macd_hist?: number | null;
+  atr?: number | null;
+  stoch_k?: number | null;
+  stoch_d?: number | null;
   [key: string]: unknown;
 };
 

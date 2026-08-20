@@ -12,6 +12,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 
 PBKDF2_ITERATIONS = 260_000
@@ -31,6 +32,59 @@ def verify_password(password: str, stored_hash: str) -> bool:
     salt = bytes.fromhex(salt_hex)
     expected = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, PBKDF2_ITERATIONS)
     return hmac.compare_digest(expected.hex(), digest_hex)
+
+
+class AttemptLimiter:
+    """Fixed-window attempt limiter, keyed by client IP.
+
+    The MPIN is short enough to brute-force, and the reset route has to be
+    reachable while logged out, so it gets a hard cap instead of relying on
+    the secret's own strength.
+    """
+
+    def __init__(self, max_attempts: int = 5, window: int = 900):
+        self.max_attempts = max_attempts
+        self.window = window
+        self._hits: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
+
+    def _prune(self, key: str, now: float) -> list[float]:
+        recent = [t for t in self._hits.get(key, []) if now - t < self.window]
+        self._hits[key] = recent
+        return recent
+
+    def blocked_for(self, key: str) -> int:
+        """Seconds until this key may try again, or 0 if it may try now."""
+        now = time.time()
+        with self._lock:
+            recent = self._prune(key, now)
+            if len(recent) < self.max_attempts:
+                return 0
+            return int(self.window - (now - min(recent))) + 1
+
+    def remaining(self, key: str) -> int:
+        """Attempts left in the current window."""
+        with self._lock:
+            used = len(self._prune(key, time.time()))
+        return max(0, self.max_attempts - used)
+
+    def record_failure(self, key: str) -> None:
+        with self._lock:
+            now = time.time()
+            self._prune(key, now)
+            self._hits.setdefault(key, []).append(now)
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._hits.pop(key, None)
+
+
+def verify_mpin(supplied: str) -> bool:
+    """Constant-time check against the broker MPIN held in the environment."""
+    expected = os.environ.get("ANGELONE_MPIN", "")
+    if not expected or not supplied:
+        return False
+    return hmac.compare_digest(str(supplied).strip(), expected.strip())
 
 
 def _secret() -> bytes:
