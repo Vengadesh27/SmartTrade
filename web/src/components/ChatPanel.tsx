@@ -19,7 +19,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState('');
   const endRef = useRef<HTMLDivElement>(null);
 
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['chat'],
     queryFn: () => api.get<HistoryResponse>('/chat/history'),
   });
@@ -75,7 +75,23 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       )}
 
       <div className="chat-log">
-        {!messages.length && <div className="empty">Ask about indicators, SMC, the market, or this app.</div>}
+        {/* Skeleton while the stored conversation is fetched, so an existing
+            history never flashes as "no messages yet". */}
+        {isLoading && (
+          <div className="chat-skeleton" aria-label="Loading conversation">
+            {[68, 45, 82].map((w, i) => (
+              <div key={i} className={`chat-msg ${i === 1 ? 'user' : 'assistant'}`}>
+                <div className="chat-bubble skeleton-bubble" style={{ width: `${w}%` }}>
+                  <span className="skeleton-line" />
+                  <span className="skeleton-line short" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        {!isLoading && !messages.length && (
+          <div className="empty">Ask about indicators, SMC, the market, or this app.</div>
+        )}
         {messages.map((m) => (
           <div key={m.id} className={`chat-msg ${m.role}`}>
             {/* Assistant replies are Markdown; the user's own text stays literal. */}
@@ -87,7 +103,14 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         ))}
         {send.isPending && (
           <div className="chat-msg assistant">
-            <div className="chat-bubble chat-typing">thinking…</div>
+            <div className="chat-bubble chat-typing">
+              <span className="typing-dots">
+                <i />
+                <i />
+                <i />
+              </span>
+              analysing the chart…
+            </div>
           </div>
         )}
         <div ref={endRef} />
