@@ -1,11 +1,13 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Instrument, Quote } from '../lib/types';
-import { OrderForm } from './OrderForm';
+// queryClient still used by other tabs
+
 import { PositionsTab, HoldingsTab, OrdersTab } from './AccountTables';
 import { BotConfig } from './BotConfig';
+import { OptionsOrder } from './OptionsOrder';
 
-const TABS = ['Order', 'Positions', 'Holdings', 'Book', 'Bot'] as const;
+const TABS = ['Options', 'Positions', 'Holdings', 'Book', 'Bot'] as const;
 type Tab = (typeof TABS)[number];
 
 export function RightPanel({
@@ -17,7 +19,7 @@ export function RightPanel({
   quote: Quote | null;
   enabled?: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>('Order');
+  const [tab, setTab] = useState<Tab>('Options');
   const queryClient = useQueryClient();
 
   return (
@@ -29,12 +31,8 @@ export function RightPanel({
           </button>
         ))}
       </div>
-      {tab === 'Order' && (
-        <OrderForm
-          active={active}
-          quote={quote}
-          onOrderSent={() => queryClient.invalidateQueries({ queryKey: ['orders'] })}
-        />
+      {tab === 'Options' && (
+        <OptionsOrder underlyingSpot={quote?.ltp ?? null} />
       )}
       {tab === 'Positions' && (
         <div className="tab-body"><PositionsTab /></div>

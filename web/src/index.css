@@ -1511,6 +1511,197 @@ th.num {
   margin: 0 2px;
 }
 
+/* ---------------- options order form ---------------- */
+.options-order {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+  padding: 10px;
+}
+.oo-controls {
+  display: flex;
+  gap: 6px;
+}
+.oo-underlying {
+  flex: 0 0 110px;
+  font-weight: 700;
+}
+.oo-expiry {
+  flex: 1;
+  font-size: 11px;
+}
+.oo-type-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+.oo-type-btn {
+  padding: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  border-radius: 7px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+.oo-type-btn.active-ce {
+  background: rgba(14, 159, 110, 0.12);
+  border-color: var(--up);
+  color: var(--up);
+}
+.oo-type-btn.active-pe {
+  background: rgba(224, 36, 36, 0.1);
+  border-color: var(--down);
+  color: var(--down);
+}
+.oo-ltp-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.oo-ltp {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.oo-greek {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.oo-strikes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 240px;
+}
+.oo-strike-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  transition: background 0.08s;
+}
+.oo-strike-row:last-child {
+  border-bottom: none;
+}
+.oo-strike-row:hover {
+  background: var(--panel-2);
+}
+.oo-strike-row.selected {
+  background: var(--accent-soft);
+}
+.oo-strike-row.atm .oo-strike-val {
+  color: var(--accent);
+  font-weight: 700;
+}
+.oo-strike-ltp.atm {
+  color: var(--accent);
+  font-weight: 700;
+}
+.oo-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.oo-qty-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.oo-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-direction: row;
+  white-space: nowrap;
+}
+.oo-qty-input {
+  width: 60px;
+}
+.oo-qty-hint {
+  font-size: 11px;
+}
+.oo-type-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.oo-order-type {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-strong);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.1s;
+}
+.oo-order-type.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.oo-limit-input {
+  width: 90px;
+  flex: 1;
+  font-size: 12px;
+}
+.oo-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.oo-btn {
+  padding: 10px 8px;
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 8px;
+  border: none;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: opacity 0.1s, transform 0.1s;
+}
+.oo-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+.oo-btn:not(:disabled):hover {
+  transform: translateY(-1px);
+}
+.oo-btn.buy {
+  background: var(--up);
+  color: #fff;
+}
+.oo-btn.sell {
+  background: var(--down);
+  color: #fff;
+}
+
 /* ---------------- bot config tab ---------------- */
 .bot-config-tab {
   overflow-y: auto;
