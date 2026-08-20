@@ -811,6 +811,24 @@ h2 {
 .tv-int:hover {
   background: var(--panel-2);
 }
+/* pulses while that timeframe is being fetched, so a switch feels responsive */
+.tv-int.loading {
+  animation: tv-int-pulse 0.9s ease-in-out infinite;
+}
+@keyframes tv-int-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tv-int.loading {
+    animation: none;
+  }
+}
 .tv-int.on {
   background: var(--accent-soft);
   color: var(--accent);

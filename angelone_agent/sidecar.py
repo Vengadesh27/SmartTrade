@@ -6,6 +6,7 @@ Callers must hold a signed session cookie from /auth/login — see auth.py.
 
 import asyncio
 import datetime as dt
+import functools
 import os
 import re
 import secrets
@@ -348,6 +349,7 @@ def scrip_rows():
         return _scrip_rows
 
 
+@functools.lru_cache(maxsize=256)
 def resolve_row(symbol, exchange="NSE"):
     """Find the row a user means by a short name.
 

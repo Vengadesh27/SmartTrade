@@ -14,7 +14,7 @@ import {
   type ISeriesMarkersPluginApi,
   type Time,
 } from 'lightweight-charts';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { barTime, INTERVALS, RANGES, type Candle, type CandlesResponse } from '../lib/candles';
 import {
@@ -101,6 +101,12 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
       ),
     enabled: !!active,
     refetchInterval: 60_000,
+    // Switching timeframes used to refetch every time, even straight back to
+    // one just viewed. Treating data as fresh for 30s makes those instant,
+    // and keeping the previous result on screen avoids a blank chart while a
+    // genuinely new timeframe loads.
+    staleTime: 30_000,
+    placeholderData: keepPreviousData,
     // The global default is retry:false, but AngelOne throttles in bursts —
     // without a retry one blip leaves the chart empty until a manual reload.
     retry: 3,
@@ -324,8 +330,23 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
     if (s) {
       if (s.prev_high != null) addLine(s.prev_high, '#f59e0b', 'PDH');
       if (s.prev_low != null) addLine(s.prev_low, '#f59e0b', 'PDL');
-      for (const p of s.resistance) addLine(p, cssVar('--down'), 'R');
-      for (const p of s.support) addLine(p, cssVar('--up'), 'S');
+
+      // Number the levels outward from price, so R1/S1 are the ones price has
+      // to deal with first. Levels on the wrong side of price are ranked after
+      // the correctly-sided ones rather than dropped.
+      const last = rows[rows.length - 1].close;
+      const rank = (levels: number[], above: boolean) =>
+        [...new Set(levels)]
+          .sort((a, b) => {
+            const aSide = above ? a >= last : a <= last;
+            const bSide = above ? b >= last : b <= last;
+            if (aSide !== bSide) return aSide ? -1 : 1;
+            return Math.abs(a - last) - Math.abs(b - last);
+          })
+          .slice(0, 3);
+
+      rank(s.resistance, true).forEach((p, i) => addLine(p, cssVar('--down'), `R${i + 1}`));
+      rank(s.support, false).forEach((p, i) => addLine(p, cssVar('--up'), `S${i + 1}`));
     }
 
     // SMC zones/structure/sweeps are painted on the canvas overlay (boxes and
@@ -408,7 +429,9 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
           {INTERVALS.map((iv) => (
             <button
               key={iv.id}
-              className={`tv-int${interval === iv.id ? ' on' : ''}`}
+              className={`tv-int${interval === iv.id ? ' on' : ''}${
+                isFetching && interval === iv.id ? ' loading' : ''
+              }`}
               onClick={() => setInterval_(iv.id)}
             >
               {iv.label}
