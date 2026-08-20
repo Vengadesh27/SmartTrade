@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 from angelone_agent import auth as auth_module
 from angelone_agent import bot as bot_module
 from angelone_agent import chat as chat_module
+from angelone_agent import greeks as greeks_mod
 from angelone_agent import markets, smc
 from angelone_agent.analysis import add_indicators, summarize, to_dataframe
 from angelone_agent.client import SCRIP_MASTER_URL, AngelOneClient
@@ -311,6 +312,9 @@ class _TTLCache:
 _quote_cache = _TTLCache(2.0)
 _candle_cache = _TTLCache(20.0)
 _book_cache = _TTLCache(5.0)
+# Last successful candle payload per key, kept all day. AngelOne throttles in
+# bursts; serving slightly stale bars beats blanking the chart.
+_candle_last_good = _TTLCache(86400.0)
 
 
 # --------------------------------------------------------------------------
@@ -565,6 +569,9 @@ def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE", d
                 to_date=end.strftime("%Y-%m-%d %H:%M"),
             )
     except Exception as exc:
+        stale = _candle_last_good.get(key)
+        if stale:
+            return {**stale, "stale": True, "stale_reason": str(exc)[:200]}
         raise HTTPException(status_code=502, detail=f"could not load candles: {exc}")
     if not raw:
         return {"symbol": tsym, "token": token, "exchange": exch, "candles": [], "summary": None}
@@ -635,6 +642,7 @@ def candles(symbol: str, exchange: str = "NSE", interval: str = "FIVE_MINUTE", d
         },
     }
     _candle_cache.put(key, out)
+    _candle_last_good.put(key, out)
     return out
 
 
@@ -721,6 +729,16 @@ def options_chain(underlying: str, expiry: str, exchange: str = "NFO"):
     except Exception:
         pass  # Greeks/IV are a nice-to-have, not worth failing the chain over
 
+    # Spot for the local greek solver — the broker's own greeks are usually
+    # empty, so IV and the rest are derived from each leg's traded price.
+    spot = None
+    try:
+        spot = float(quote(underlying, "NSE")["ltp"]) or None
+    except Exception:
+        pass
+    expiry_date = markets.parse_expiry(expiry)
+    computed_any = False
+
     out_rows = []
     for strike in sorted(strikes):
         row = {"strike": strike}
@@ -731,23 +749,41 @@ def options_chain(underlying: str, expiry: str, exchange: str = "NFO"):
                 continue
             q = quotes_by_token.get(str(info["token"])) or {}
             g = greeks_by_symbol.get(info["symbol"]) or {}
-            row[side] = {
-                "symbol": info["symbol"],
-                "token": info["token"],
-                "lotsize": info["lotsize"],
-                "ltp": _num(q.get("ltp")),
-                "change_pct": _num(q.get("percentChange")),
-                "oi": _num(q.get("opnInterest")),
-                "volume": _num(q.get("tradeVolume")),
+            ltp = _num(q.get("ltp"))
+
+            leg = {
                 "iv": _num(g.get("impliedVolatility")),
                 "delta": _num(g.get("delta")),
                 "gamma": _num(g.get("gamma")),
                 "theta": _num(g.get("theta")),
                 "vega": _num(g.get("vega")),
             }
+            if leg["delta"] is None and spot and expiry_date and ltp:
+                local = greeks_mod.solve(ltp, spot, strike, expiry_date, side == "CE")
+                if local["delta"] is not None:
+                    leg = local
+                    computed_any = True
+
+            row[side] = {
+                "symbol": info["symbol"],
+                "token": info["token"],
+                "lotsize": info["lotsize"],
+                "ltp": ltp,
+                "change_pct": _num(q.get("percentChange")),
+                "oi": _num(q.get("opnInterest")),
+                "volume": _num(q.get("tradeVolume")),
+                **leg,
+            }
         out_rows.append(row)
 
-    out = {"underlying": underlying, "expiry": expiry, "exchange": exchange, "rows": out_rows}
+    out = {
+        "underlying": underlying,
+        "expiry": expiry,
+        "exchange": exchange,
+        "spot": spot,
+        "greeks_source": "computed" if computed_any else "broker",
+        "rows": out_rows,
+    }
     _chain_cache.put(key, out)
     return out
 

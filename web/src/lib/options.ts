@@ -23,5 +23,9 @@ export type ChainResponse = {
   underlying: string;
   expiry: string;
   exchange: string;
+  /** underlying spot used for the local greek solve */
+  spot: number | null;
+  /** 'computed' when greeks were derived locally because the broker sent none */
+  greeks_source: 'broker' | 'computed';
   rows: ChainRow[];
 };

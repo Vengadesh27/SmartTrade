@@ -39,20 +39,36 @@ export type CandlesResponse = {
   interval: string;
   session: string;
   market_open: boolean;
+  /** Set when the broker was throttled and the last good payload was served. */
+  stale?: boolean;
+  stale_reason?: string;
   candles: Candle[];
   smc: {
-    structure: { index: number; price: number; type: 'BOS' | 'CHoCH'; side: 'bull' | 'bear' }[];
+    structure: { index: number; from: number; price: number; type: 'BOS' | 'CHoCH'; side: 'bull' | 'bear' }[];
     zones: {
       kind: 'fvg' | 'ifvg' | 'ob' | 'breaker';
       side: 'bull' | 'bear';
+      /** bar indices into `candles` — the backend sends these, so zones can be
+       *  drawn as boxes rather than flat price lines */
+      start: number;
+      end: number;
       top: number;
       bottom: number;
       mitigated: boolean;
       label: string;
     }[];
-    liquidity: { index: number; price: number; side: 'BSL' | 'SSL' }[];
-    equal: { side: 'EQH' | 'EQL'; price: number }[];
-    range: { top: number; bottom: number; equilibrium: number; position: 'premium' | 'discount' } | null;
+    sweeps: { index: number; side: 'bull' | 'bear'; price: number; level: number; label: string }[];
+    liquidity: { index: number; price: number; side: 'BSL' | 'SSL'; end: number }[];
+    equal: { side: 'EQH' | 'EQL'; price: number; start: number; end: number }[];
+    range: {
+      start: number;
+      end: number;
+      top: number;
+      bottom: number;
+      equilibrium: number;
+      position: 'premium' | 'discount';
+      pct: number;
+    } | null;
     counts: Record<string, number>;
   } | null;
   summary: {

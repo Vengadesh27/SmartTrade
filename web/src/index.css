@@ -221,6 +221,39 @@ h2 {
   font-size: 12.5px;
   margin: -2px 0 4px;
 }
+.chain-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.chain-note {
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.smc-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+}
+
+.tv-stale {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 99px;
+  padding: 2px 8px;
+  margin-right: 8px;
+}
+
 /* profile page: identity strip + settings cards */
 .account-meta {
   display: flex;

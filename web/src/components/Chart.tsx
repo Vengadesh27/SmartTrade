@@ -12,7 +12,6 @@ import {
   type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
-  type SeriesMarker,
   type Time,
 } from 'lightweight-charts';
 import { useQuery } from '@tanstack/react-query';
@@ -29,6 +28,12 @@ import {
   type ChartType,
 } from '../lib/indicators';
 import { buildSnapshot, setChartSnapshot } from '../lib/chartContext';
+import {
+  DEFAULT_SMC_LAYERS,
+  SMC_LAYER_LABELS,
+  useSmcOverlay,
+  type SmcLayers,
+} from '../lib/useSmcOverlay';
 import { fmt } from '../lib/format';
 import type { Instrument, Quote } from '../lib/types';
 import { keyOf } from '../lib/types';
@@ -68,6 +73,13 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
   const [osc, setOsc] = useState(() => localStorage.getItem('osc') || 'rsi');
   const [overlayOn, setOverlayOn] = useState<Record<string, boolean>>(loadOverlayPrefs);
   const [showPanel, setShowPanel] = useState(false);
+  const [smcLayers, setSmcLayers] = useState<SmcLayers>(() => {
+    try {
+      return { ...DEFAULT_SMC_LAYERS, ...(JSON.parse(localStorage.getItem('smcLayers') || 'null') || {}) };
+    } catch {
+      return DEFAULT_SMC_LAYERS;
+    }
+  });
   const [logScale, setLogScale] = useState(false);
   const [hover, setHover] = useState<Candle | null>(null);
 
@@ -89,7 +101,13 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
       ),
     enabled: !!active,
     refetchInterval: 60_000,
+    // The global default is retry:false, but AngelOne throttles in bursts —
+    // without a retry one blip leaves the chart empty until a manual reload.
+    retry: 3,
+    retryDelay: (attempt) => Math.min(2000 * 2 ** attempt, 15_000),
   });
+
+  const smcCanvasRef = useSmcOverlay(chartApi, priceApi, paneEl, data, smcLayers, mode === 'smc');
 
   // ---- chart + overlay series (once) ----
   useEffect(() => {
@@ -310,36 +328,9 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
       for (const p of s.support) addLine(p, cssVar('--up'), 'S');
     }
 
-    if (mode === 'smc' && data.smc) {
-      const { zones, liquidity, equal, range } = data.smc;
-      for (const z of zones.filter((z) => !z.mitigated).slice(-6)) {
-        const color = z.side === 'bull' ? cssVar('--up') : cssVar('--down');
-        addLine(z.top, color, z.label);
-        addLine(z.bottom, color, z.label);
-      }
-      for (const l of liquidity.slice(-6)) {
-        addLine(l.price, l.side === 'BSL' ? cssVar('--down') : cssVar('--up'), l.side);
-      }
-      for (const e of equal.slice(-4)) addLine(e.price, '#a855f7', e.side);
-      if (range) {
-        addLine(range.top, '#a855f7', 'Premium');
-        addLine(range.bottom, '#a855f7', 'Discount');
-        addLine(range.equilibrium, cssVar('--muted'), 'EQ');
-      }
-
-      const markers: SeriesMarker<Time>[] = data.smc.structure
-        .filter((e) => e.index < rows.length)
-        .map((e) => ({
-          time: barTime(rows[e.index].time) as unknown as Time,
-          position: e.side === 'bull' ? 'belowBar' : 'aboveBar',
-          color: e.side === 'bull' ? cssVar('--up') : cssVar('--down'),
-          shape: e.side === 'bull' ? 'arrowUp' : 'arrowDown',
-          text: e.type,
-        }));
-      markersRef.current?.setMarkers(markers);
-    } else {
-      markersRef.current?.setMarkers([]);
-    }
+    // SMC zones/structure/sweeps are painted on the canvas overlay (boxes and
+    // labels), not as price lines — see useSmcOverlay.
+    markersRef.current?.setMarkers([]);
 
     chart.timeScale().fitContent();
   }, [data, mode, chartType, osc, overlayOn]);
@@ -462,6 +453,11 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
           Fit
         </button>
         <span className="tv-spacer" />
+        {data?.stale && (
+          <span className="tv-stale" title={data.stale_reason}>
+            stale — broker throttled
+          </span>
+        )}
         <span className="muted">{data ? `${data.session}${data.market_open ? '' : ' · market closed'}` : ''}</span>
         <button className="tv-btn" onClick={() => refetch()}>
           Refresh
@@ -483,6 +479,25 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
                 <span>{o.label}</span>
               </label>
             ))}
+            <div className="ind-group">
+              Smart money {mode !== 'smc' && <span className="muted">— switch mode to show</span>}
+            </div>
+            {SMC_LAYER_LABELS.map((s) => (
+              <label key={s.id} className="ind-row">
+                <input
+                  type="checkbox"
+                  checked={smcLayers[s.id]}
+                  onChange={() =>
+                    setSmcLayers((prev) => {
+                      const next = { ...prev, [s.id]: !prev[s.id] };
+                      localStorage.setItem('smcLayers', JSON.stringify(next));
+                      return next;
+                    })
+                  }
+                />
+                <span>{s.label}</span>
+              </label>
+            ))}
           </div>
         )}
       </div>
@@ -492,6 +507,8 @@ export function Chart({ active, tick }: { active: Instrument | null; tick: Quote
         <div className="tv-panes" style={{ flex: 1 }}>
           <div className="tv-pane" id="price-pane" ref={setPaneEl}>
             <div ref={containerRef} className="chart" />
+            {/* SMC annotations sit under the user's own drawings */}
+            <canvas ref={smcCanvasRef} className="smc-layer" />
             <DrawingCanvas {...drawing} />
             {/* An empty chart is ambiguous — say why there is nothing to draw.
                 AngelOne rate-limits candles, and that used to fail silently. */}

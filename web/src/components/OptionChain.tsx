@@ -15,6 +15,7 @@ export function OptionChain({ underlyingLtp, onClose }: { underlyingLtp: number 
   const [lots, setLots] = useState(1);
   const [pending, setPending] = useState<PendingLeg | null>(null);
   const [log, setLog] = useState('');
+  const [showGreeks, setShowGreeks] = useState(() => localStorage.getItem('chainGreeks') !== '0');
 
   const { data: expiries } = useQuery({
     queryKey: ['option-expiries', underlying],
@@ -68,10 +69,13 @@ export function OptionChain({ underlyingLtp, onClose }: { underlyingLtp: number 
   }
 
   function LegCell({ leg, side }: { leg: OptionLeg; side: 'CE' | 'PE' }) {
-    if (!leg) return <td colSpan={5} className="empty">—</td>;
+    if (!leg) return <td colSpan={showGreeks ? 7 : 4} className="empty">—</td>;
     return (
       <>
         <td className="num">{leg.oi != null ? fmt(leg.oi, 0) : '—'}</td>
+        {showGreeks && <td className="num">{leg.delta != null ? fmt(leg.delta, 3) : '—'}</td>}
+        {showGreeks && <td className="num">{leg.theta != null ? fmt(leg.theta, 1) : '—'}</td>}
+        {showGreeks && <td className="num">{leg.vega != null ? fmt(leg.vega, 2) : '—'}</td>}
         <td className="num">{leg.iv != null ? fmt(leg.iv, 1) : '—'}</td>
         <td className={`num ${leg.change_pct != null ? cls(leg.change_pct) : ''}`}>
           {leg.ltp != null ? fmt(leg.ltp) : '—'}
@@ -98,6 +102,22 @@ export function OptionChain({ underlyingLtp, onClose }: { underlyingLtp: number 
           </button>
         </div>
         <div className="option-chain-controls">
+          <label className="chain-toggle">
+            <input
+              type="checkbox"
+              checked={showGreeks}
+              onChange={(e) => {
+                setShowGreeks(e.target.checked);
+                localStorage.setItem('chainGreeks', e.target.checked ? '1' : '0');
+              }}
+            />
+            <span>Greeks</span>
+          </label>
+          {chain?.greeks_source === 'computed' && (
+            <span className="muted chain-note" title="Black-Scholes from each leg's LTP — the broker returned none">
+              greeks computed locally
+            </span>
+          )}
           <select value={underlying} onChange={(e) => setUnderlying(e.target.value)}>
             {UNDERLYINGS.map((u) => (
               <option key={u}>{u}</option>
@@ -125,18 +145,24 @@ export function OptionChain({ underlyingLtp, onClose }: { underlyingLtp: number 
             <table className="option-chain-table">
               <thead>
                 <tr>
-                  <th colSpan={4}>CALLS</th>
+                  <th colSpan={showGreeks ? 7 : 4}>CALLS</th>
                   <th>Strike</th>
-                  <th colSpan={4}>PUTS</th>
+                  <th colSpan={showGreeks ? 7 : 4}>PUTS</th>
                 </tr>
                 <tr>
                   <th className="num">OI</th>
+                  {showGreeks && <th className="num">Δ</th>}
+                  {showGreeks && <th className="num">Θ</th>}
+                  {showGreeks && <th className="num">V</th>}
                   <th className="num">IV</th>
                   <th className="num">LTP</th>
                   <th className="num"></th>
                   <th className="num">Strike</th>
                   <th className="num">LTP</th>
                   <th className="num">IV</th>
+                  {showGreeks && <th className="num">V</th>}
+                  {showGreeks && <th className="num">Θ</th>}
+                  {showGreeks && <th className="num">Δ</th>}
                   <th className="num">OI</th>
                   <th className="num"></th>
                 </tr>
